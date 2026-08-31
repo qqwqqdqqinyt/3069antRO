@@ -166,7 +166,7 @@ if (err) {
   process.exit(1);
 }
 
-console.log('\n--- 150 秒模拟结果 ---');
+console.log('\n--- 600 秒模拟结果 ---');
 const order = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
 console.log('  事件计数（Top 12）:');
 order.slice(0, 12).forEach(k => console.log('    ' + k.padEnd(22) + counts[k]));
