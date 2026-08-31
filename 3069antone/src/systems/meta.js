@@ -46,7 +46,9 @@
     }
   };
 
-  function upCost(level) { return Math.round(40 * Math.pow(1.30, level - 1)); }
+  // 养成成本曲线参数抽成对象，便于外部数值表覆盖（见 data/balance.js）
+  var UPGRADE_COST = { base: 40, pow: 1.30 };
+  function upCost(level) { return Math.round(UPGRADE_COST.base * Math.pow(UPGRADE_COST.pow, level - 1)); }
 
   /* ---------------- 花园 ----------------
    * 产出速率 = 稀有度基础 × (1 + 星级×0.1) × (1 + 花园等级×0.05)
@@ -67,7 +69,8 @@
     { key: '6h', name: '6 小时', h: 6 }
   ];
 
-  var OFFLINE_CAP_H = 12;
+  // 抽成对象，便于外部数值表覆盖
+  var CAP = { offlineH: 12 };
 
   /* ---------------- 商店 ---------------- */
   var SHOP = [
@@ -147,7 +150,8 @@
   Meta.DURATIONS = DURATIONS;
   Meta.RARITY_BASE = RARITY_BASE;
   Meta.RARITY_CN = RARITY_CN;
-  Meta.OFFLINE_CAP_H = OFFLINE_CAP_H;
+  Meta.CAP = CAP;
+  Meta.UPGRADE_COST = UPGRADE_COST;
   Meta.upCost = upCost;
   Meta.SAVE_KEY = SAVE_KEY;
 
@@ -271,11 +275,11 @@
     return M.clamp(elapsedH / g.hours, 0, 1);
   };
 
-  /** 可收获星尘（离线最多累计 OFFLINE_CAP_H 小时） */
+  /** 可收获星尘（离线最多累计 CAP.offlineH 小时） */
   Meta.prototype.potYield = function (slot) {
     var g = this.profile.garden[slot];
     if (!g) return 0;
-    var elapsedH = Math.min((Date.now() - g.plantedAt) / 3600000, OFFLINE_CAP_H);
+    var elapsedH = Math.min((Date.now() - g.plantedAt) / 3600000, CAP.offlineH);
     return Math.floor(this.yieldRate(g.kind) * Math.min(elapsedH, g.hours));
   };
 

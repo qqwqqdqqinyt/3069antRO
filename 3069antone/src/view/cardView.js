@@ -254,6 +254,7 @@
     this.cards = cards;
     this.W = opts.w || 1040;
     this.H = opts.h || 640;
+    this.portrait = !!opts.portrait;
     this.t = 0;
     this.hover = -1;
     this.rects = [];
@@ -270,6 +271,12 @@
     this.anim = [0, 0, 0];
   };
   CardView.prototype.hide = function () { this.visible = false; this.hover = -1; };
+
+  /** 屏幕形状变化时由 main.js 调过来（横竖屏切换不必重建 CardView） */
+  CardView.prototype.resize = function (w, h, portrait) {
+    this.W = w; this.H = h; this.portrait = !!portrait;
+    this.rects = [];
+  };
 
   CardView.prototype.update = function (dt) {
     this.t += dt;
@@ -309,32 +316,43 @@
     ctx.fillStyle = 'rgba(4,8,14,.80)';
     ctx.fillRect(0, 0, W, H);
 
+    var n = p.options.length;
+    var cw, ch, gap, sx, topY;
+
+    if (this.portrait) {
+      // 竖屏：三张横排需要 3×236 + 2×26 = 760 逻辑宽，而屏宽只有 540 —— 只能改成纵向堆叠
+      var avail = H - 112 - 56;                       // 上下留出标题区和提示区
+      ch = Math.max(210, Math.min(270, (avail - 28) / 3));
+      cw = Math.min(W - 72, 420);
+      gap = 14;
+      sx = (W - cw) / 2;
+      topY = 112 + (avail - (ch * 3 + gap * 2)) / 2;  // 三张整体垂直居中
+    } else {
+      cw = 236; ch = 330; gap = 26;
+      sx = (W - (n * cw + (n - 1) * gap)) / 2;
+      topY = H / 2 - 6 - ch / 2;
+    }
+
     // 标题
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = '900 26px "Noto Sans SC", system-ui, sans-serif';
+    ctx.font = '900 ' + (this.portrait ? 22 : 26) + 'px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#eaf3ff';
-    ctx.fillText('三 选 一', W / 2, 92);
+    ctx.fillText('三 选 一', W / 2, this.portrait ? 62 : 92);
     ctx.font = '600 12px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#7d95b5';
     var sub = p.reason === 'level' ? '通关奖励 · 选择一张卡带入下一关' : '第 ' + p.wave + ' 波清空 · 选择一张卡';
-    ctx.fillText(sub, W / 2, 118);
+    ctx.fillText(sub, W / 2, this.portrait ? 86 : 118);
 
-    var n = p.options.length;
-    var cw = 236, ch = 330, gap = 26;
-    var totalW = n * cw + (n - 1) * gap;
-    var sx = (W - totalW) / 2;
-    var cy = H / 2 - 6;
     this.rects = [];
-
     for (var i = 0; i < n; i++) {
       var card = p.options[i];
       var a = this.anim[i];
-      var x = sx + i * (cw + gap);
-      // 入场：从下方浮起 + 淡入
-      var y = cy - ch / 2 + (1 - a) * 46;
-      ctx.globalAlpha = a;
       var hov = (this.hover === i);
-      var lift = hov ? -10 : 0;
+      var x = this.portrait ? sx : sx + i * (cw + gap);
+      // 入场：从下方浮起 + 淡入
+      var y = (this.portrait ? topY + i * (ch + gap) : topY) + (1 - a) * 46;
+      var lift = hov ? (this.portrait ? -6 : -10) : 0;
+      ctx.globalAlpha = a;
       this._card(ctx, card, x, y + lift, cw, ch, hov, i);
       ctx.globalAlpha = 1;
       this.rects.push({ x: x, y: y + lift, w: cw, h: ch });
@@ -342,7 +360,11 @@
 
     ctx.font = '600 11px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(140,165,195,.72)';
-    ctx.fillText('点击卡面或按 1 / 2 / 3 选择　·　战力点 PP 越高，对输出的提升越大', W / 2, H - 54);
+    ctx.textAlign = 'center';
+    ctx.fillText(this.portrait
+      ? '点击卡面选择　·　PP 越高，对输出的提升越大'
+      : '点击卡面或按 1 / 2 / 3 选择　·　战力点 PP 越高，对输出的提升越大',
+      W / 2, this.portrait ? H - 30 : H - 54);
     ctx.restore();
   };
 
@@ -381,38 +403,50 @@
     ctx.font = '800 12px system-ui, sans-serif';
     ctx.fillText(String(idx + 1), x + w - 14, y + 18);
 
+    // 卡面内部各元素的纵向偏移：
+    // 横屏沿用原版固定值；竖屏卡更矮（210~270），按新节奏重排，并砍掉 flavor 让位给描述
+    var P = !this.portrait;
+    var iY = P ? 92 : 76;
+    var nY = P ? 152 : 124;
+    var dY = P ? 182 : 150;
+    var dLh = P ? 18 : 17;
+    var dW = P ? w - 34 : w - 40;
+    var dLines = P ? 4 : 3;
+    var oY = P ? h - 74 : h - 62;
+    var pY = P ? h - 44 : h - 34;
+
     // 图标
-    icon(ctx, card, x + w / 2, y + 92, 1.05, this.t + idx);
+    icon(ctx, card, x + w / 2, y + iY, P ? 1.05 : 1.0, this.t + idx);
 
     // 名称
     ctx.textAlign = 'center';
     ctx.font = '900 19px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#f2f8ff';
-    ctx.fillText(card.name, x + w / 2, y + 152);
+    ctx.fillText(card.name, x + w / 2, y + nY);
 
     // 效果描述（自动折行）
     ctx.font = '600 12.5px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#c8d8ea';
-    wrapText(ctx, card.desc, x + w / 2, y + 182, w - 34, 18, 4);
+    wrapText(ctx, card.desc, x + w / 2, y + dY, dW, dLh, dLines);
 
     // 已持有
     if (stack > 0) {
       ctx.font = '800 11px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = '#9fe8b0';
-      ctx.fillText('已持有 ×' + stack, x + w / 2, y + h - 74);
+      ctx.fillText('已持有 ×' + stack, x + w / 2, y + oY);
     }
 
     // 战力点
     ctx.font = '700 10px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(140,165,195,.8)';
-    ctx.fillText('战力点', x + w / 2 - 26, y + h - 44);
+    ctx.fillText('战力点', x + w / 2 - 26, y + pY);
     ctx.font = '900 17px system-ui, sans-serif';
     ctx.fillStyle = card.pp >= 20 ? '#ffc44d' : card.pp >= 11 ? '#c58bff'
       : card.pp >= 7 ? '#5fb4ff' : '#9fb4cc';
-    ctx.fillText(card.pp > 0 ? card.pp.toFixed(1) : '—', x + w / 2 + 12, y + h - 43);
+    ctx.fillText(card.pp > 0 ? card.pp.toFixed(1) : '—', x + w / 2 + 12, y + pY + 1);
 
-    // flavor
-    if (card.flavor) {
+    // flavor（竖屏空间不够，省略）
+    if (card.flavor && P) {
       ctx.font = '500 10px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = 'rgba(140,165,195,.55)';
       wrapText(ctx, card.flavor, x + w / 2, y + h - 22, w - 30, 13, 1);

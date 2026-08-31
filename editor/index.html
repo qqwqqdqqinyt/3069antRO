@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星序防线 · 编辑器（关卡 / 地图 / 数值）</title>
+<link rel="stylesheet" href="css/editor.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">星</span>
+    <div class="brand-txt">
+      <b>星序防线 · 编辑器</b>
+      <small>2048 合成 × 塔防 · 关卡与地图工具链</small>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-panel="assets">① 图鉴 / 数值</button>
+    <button class="tab" data-panel="scene">② 场景预览</button>
+    <button class="tab" data-panel="level">③ 关卡编辑器</button>
+    <button class="tab" data-panel="map">④ 地图编辑</button>
+    <button class="tab" data-panel="export">⑤ 导出 / 接入</button>
+  </nav>
+  <div class="status">
+    <span id="linkState" class="pill">检测数据源…</span>
+    <span id="saveState" class="pill ghost">草稿已同步</span>
+  </div>
+</header>
+
+<main id="stage"></main>
+<div id="toasts"></div>
+
+<!-- ============================================================
+     游戏本体源码（只读引用，编辑器不修改游戏任何文件）
+     这样编辑器里的精灵、数值、公式与游戏 100% 同源。
+     ============================================================ -->
+<script src="../3069antone/src/core/bus.js"></script>
+<script src="../3069antone/src/core/rng.js"></script>
+<script src="../3069antone/src/art/pixel.js"></script>
+<script src="../3069antone/src/art/plantArt.js"></script>
+<script src="../3069antone/src/art/insectArt.js"></script>
+<script src="../3069antone/src/art/fx.js"></script>
+<script src="../3069antone/src/systems/board2048.js"></script>
+<script src="../3069antone/src/systems/battlefield.js"></script>
+<script src="../3069antone/src/systems/director.js"></script>
+<script src="../3069antone/src/view/battleView.js"></script>
+<script src="../3069antone/src/view/boardView.js"></script>
+
+<!-- 编辑器自身 -->
+<script src="js/core.js"></script>
+<script src="js/data.js"></script>
+<script src="js/panel-assets.js"></script>
+<script src="js/panel-scene.js"></script>
+<script src="js/panel-level.js"></script>
+<script src="js/panel-map.js"></script>
+<script src="js/panel-export.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

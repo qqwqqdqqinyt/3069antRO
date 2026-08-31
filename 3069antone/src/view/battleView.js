@@ -17,6 +17,9 @@
 
   BattleView.prototype.update = function (dt) { this.t += dt; };
 
+  /** 屏幕形状变化：整个渲染都基于 region，换掉即可（无敌方状态需要迁移） */
+  BattleView.prototype.relayout = function (region) { this.region = region; };
+
   BattleView.prototype.draw = function (ctx, fx) {
     var bf = this.bf, R = this.region;
     ctx.save();

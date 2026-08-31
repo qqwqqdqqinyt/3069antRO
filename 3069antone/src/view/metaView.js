@@ -81,6 +81,7 @@
     this.run = run;
     this.W = opts.w || 1040;
     this.H = opts.h || 640;
+    this.portrait = !!opts.portrait;
     this.t = 0;
     this.screen = 'none';       // none | decision | settle | home
     this.tab = 'upgrade';       // upgrade | garden | shop | codex
@@ -98,6 +99,12 @@
 
   MetaView.prototype.show = function (s) { this.screen = s || 'home'; this.buttons = []; };
   MetaView.prototype.hide = function () { this.screen = 'none'; this.buttons = []; };
+
+  /** 屏幕形状变化时由 main.js 调过来（横竖屏切换不必重建 MetaView） */
+  MetaView.prototype.resize = function (w, h, portrait) {
+    this.W = w; this.H = h; this.portrait = !!portrait;
+    this.buttons = []; this.hover = null;
+  };
 
   MetaView.prototype.update = function (dt) { this.t += dt; };
 
@@ -189,6 +196,8 @@
 
     ctx.fillStyle = 'rgba(4,8,14,.80)'; ctx.fillRect(0, 0, W, H);
 
+    if (this.portrait) { this._decisionPortrait(ctx, d); return; }
+
     ctx.textAlign = 'center';
     ctx.font = '900 30px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#8fd9ff';
@@ -270,7 +279,7 @@
     ctx.font = '900 14px system-ui, sans-serif';
     ctx.fillText('×' + th.mult.toFixed(2), qx + qw - 22, py + 122);
 
-    /* ---- 决策判据：这是整个设计的 핵심 ---- */
+    /* ---- 决策判据：这是整个设计的核心 ---- */
     var bx = qx + 20, by = py + 150;
     ctx.textAlign = 'left';
     ctx.font = '700 11.5px "Noto Sans SC", system-ui, sans-serif';
@@ -317,6 +326,152 @@
     ctx.fillText('阈值会随关卡升高（第 1 关约 32%，第 5 关约 59%）—— 越往后越该收手', W / 2, H - 30);
   };
 
+  /**
+   * 竖屏决策屏。
+   * 横屏是「左累积池 / 右下一关预览」左右分栏，540 宽下每栏只剩 250 —— 两块面板改成上下堆叠，
+   * 两个按钮也从并排改成上下排列（主操作在上，方便拇指够到）。
+   */
+  MetaView.prototype._decisionPortrait = function (ctx, d) {
+    var W = this.W, H = this.H;
+    var pad = 20, cw = W - pad * 2;                 // 500
+
+    ctx.textAlign = 'center';
+    ctx.font = '900 24px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#8fd9ff';
+    ctx.fillText('第 ' + d.level + ' 关 · 通过', W / 2, 64);
+    ctx.font = '600 12.5px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#7d95b5';
+    ctx.fillText('继续冲关，还是就此收手？', W / 2, 92);
+
+    // 先把底部按钮区钉死，两块面板再在剩余空间里垂直居中
+    var btnH1 = 64, btnH2 = 56, btnTop = H - 196;
+    var top = 118, bot = btnTop - 14;
+    var h1 = 236, h2 = 320;
+    var py = top + Math.max(0, (bot - top - (h1 + 14 + h2)) / 2);
+    var py2 = py + h1 + 14;
+
+    /* ---- 上：累积池 ---- */
+    panel(ctx, pad, py, cw, h1, 16, 'rgba(10,16,26,.95)', 'rgba(140,180,230,.22)');
+    ctx.textAlign = 'left';
+    ctx.font = '800 14px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#eaf3ff';
+    ctx.fillText('当前累积池（收手可全额带走）', pad + 20, py + 26);
+
+    var keys = ['gold', 'shard', 'material', 'core', 'star'];
+    var yy = py + 56;
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+      ctx.fillStyle = '#8fa8c6';
+      ctx.fillText(CUR_CN[k], pad + 22, yy);
+      ctx.textAlign = 'right';
+      ctx.font = '900 15px system-ui, sans-serif';
+      ctx.fillStyle = C[k];
+      ctx.fillText(fmt(d.wallet[k]), pad + cw - 22, yy);
+      ctx.textAlign = 'left';
+      yy += 28;
+    }
+    ctx.font = '700 11px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#6d819e';
+    ctx.fillText('本关新增', pad + 22, yy + 14);
+    ctx.textAlign = 'right';
+    ctx.font = '800 11px system-ui, sans-serif';
+    ctx.fillStyle = '#9fe8b0';
+    ctx.fillText('+' + fmt(d.earned.gold) + ' 金 / +' + fmt(d.earned.shard) + ' 碎片',
+      pad + cw - 22, yy + 14);
+
+    /* ---- 下：下一关预览 ---- */
+    this._previewPanelPortrait(ctx, pad, py2, cw, h2, d);
+
+    /* ---- 按钮 ---- */
+    this._btn('continue', pad, btnTop, cw, btnH1, '继 续 冲 关', '#8fd9ff',
+      { type: 'continue' },
+      { sub: '预估收益 +' + fmt(d.R) + ' 价值', fs: 16 });
+    this._btn('cashout', pad, btnTop + btnH1 + 12, cw, btnH2, '收 手 结 算', '#ffd45e',
+      { type: 'cashout' },
+      { sub: '带走 100% 累积池', fs: 15 });
+
+    ctx.textAlign = 'center';
+    ctx.font = '600 11px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(140,165,195,.6)';
+    ctx.fillText('阈值随关卡升高（第 1 关约 32%，第 5 关约 59%）', W / 2, H - 34);
+  };
+
+  /** 竖屏「下一关预览」面板 */
+  MetaView.prototype._previewPanelPortrait = function (ctx, qx, py, qw, ph, d) {
+    panel(ctx, qx, py, qw, ph, 16, 'rgba(10,16,26,.95)', 'rgba(255,180,120,.22)');
+    ctx.textAlign = 'left';
+    ctx.font = '800 14px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#eaf3ff';
+    ctx.fillText('下一关预览', qx + 20, py + 26);
+
+    var th = d.threat;
+    ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#8fa8c6';
+    ctx.fillText('威胁等级', qx + 22, py + 62);
+    for (var s = 0; s < 10; s++) {
+      var on = s < th.stars;
+      ctx.beginPath();
+      ctx.arc(qx + 100 + s * 17, py + 62, 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = on ? (th.stars >= 7 ? '#ff8f6a' : th.stars >= 4 ? '#ffc44d' : '#8fd9ff')
+        : 'rgba(255,255,255,.10)';
+      ctx.fill();
+    }
+    ctx.font = '900 13px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = th.stars >= 7 ? '#ff8f6a' : '#ffc44d';
+    ctx.fillText(th.label, qx + 290, py + 62);
+
+    ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#8fa8c6';
+    ctx.fillText('敌人强度', qx + 22, py + 92);
+    ctx.textAlign = 'right';
+    ctx.font = '900 14px system-ui, sans-serif';
+    ctx.fillStyle = '#ff9f7a';
+    ctx.fillText('×' + th.hpMult.toFixed(2), qx + qw - 22, py + 92);
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#8fa8c6';
+    ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillText('收益倍率', qx + 22, py + 122);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffd45e';
+    ctx.font = '900 14px system-ui, sans-serif';
+    ctx.fillText('×' + th.mult.toFixed(2), qx + qw - 22, py + 122);
+
+    /* ---- 决策判据：整个设计的核心 ---- */
+    var bx = qx + 20, by = py + 150;
+    ctx.textAlign = 'left';
+    ctx.font = '700 11.5px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#6d819e';
+    ctx.fillText('继续优于收手，当且仅当你自认通关概率高于：', bx, by);
+
+    ctx.font = '900 30px system-ui, sans-serif';
+    ctx.fillStyle = '#ffe45e';
+    ctx.fillText((d.threshold * 100).toFixed(0) + '%', bx, by + 34);
+    ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#8fa8c6';
+    ctx.fillText('（临界概率 p*）', bx + 82, by + 36);
+
+    var good = d.chance > d.threshold;
+    ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#6d819e';
+    ctx.fillText('系统预估你的通关概率', bx, by + 72);
+    ctx.textAlign = 'right';
+    ctx.font = '900 20px system-ui, sans-serif';
+    ctx.fillStyle = good ? '#9fe8b0' : '#ff8f8f';
+    ctx.fillText((d.chance * 100).toFixed(0) + '%', bx + 360, by + 70);
+    ctx.textAlign = 'left';
+    ctx.font = '700 11px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = good ? '#9fe8b0' : '#ff8f8f';
+    ctx.fillText(good ? '→ 数学上应该继续' : '→ 数学上应该收手', bx, by + 96);
+
+    /* ---- 保底规则 ---- */
+    ctx.font = '600 11px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,143,143,.85)';
+    ctx.fillText('失败保底：星枢失守只能带走 ' + Math.round(d.keep * 100) + '% 的累积池',
+      qx + 20, py + ph - 20);
+  };
+
   /* ============================================================ */
   /*                        结算屏                                 */
   /* ============================================================ */
@@ -327,18 +482,20 @@
     if (!s) return;
     bg(ctx, W, H);
 
+    // 竖屏：面板改成满宽，标题字号收一档，底部按钮改成贴底
+    var P = this.portrait;
     var win = s.outcome === 'cashout';
     ctx.textAlign = 'center';
-    ctx.font = '900 36px "Noto Sans SC", system-ui, sans-serif';
+    ctx.font = '900 ' + (P ? 28 : 36) + 'px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = win ? '#ffe45e' : '#ff8f8f';
-    ctx.fillText(win ? '收 工 结 算' : '星 枢 失 守', W / 2, 86);
-    ctx.font = '600 13px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillText(win ? '收 工 结 算' : '星 枢 失 守', W / 2, P ? 76 : 86);
+    ctx.font = '600 ' + (P ? 12.5 : 13) + 'px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#8fa8c6';
     ctx.fillText('抵达第 ' + s.level + ' 关 · 击杀 ' + s.stats.kills + ' · 合成 ' + s.stats.merges +
-      ' 次 · 最高方块 ' + (s.stats.best || 0) + ' · 附魔 ' + s.stats.casts + ' 次', W / 2, 118);
+      ' 次 · 最高方块 ' + (s.stats.best || 0) + ' · 附魔 ' + s.stats.casts + ' 次', W / 2, P ? 108 : 118);
 
     // 保留 / 损失对照
-    var px = 150, py = 156, pw = 740, ph = 250;
+    var px = P ? 20 : 150, py = P ? 146 : 156, pw = P ? W - 40 : 740, ph = P ? 256 : 250;
     panel(ctx, px, py, pw, ph, 16, 'rgba(10,16,26,.94)', 'rgba(140,180,230,.22)');
     var keys = ['gold', 'shard', 'material', 'core', 'star', 'stardust'];
     var colW = (pw - 60) / 3;
@@ -373,8 +530,8 @@
       ctx.textAlign = 'left';
       ctx.font = '800 13px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = '#eaf3ff';
-      ctx.fillText('本局构筑（总战力点 ' + d.totalPP().toFixed(1) + '）', px, 438);
-      var bx = px, byY = 462;
+      ctx.fillText('本局构筑（总战力点 ' + d.totalPP().toFixed(1) + '）', px, P ? py + ph + 26 : 438);
+      var bx = px, byY = P ? py + ph + 50 : 462;
       for (var j = 0; j < Math.min(sum.length, 12); j++) {
         var it = sum[j];
         var R = global.CardView.RARITY[it.card.rarity] || global.CardView.RARITY['普通'];
@@ -390,7 +547,8 @@
       }
     }
 
-    this._btn('home', W / 2 - 110, 546, 220, 50, '回 到 家 园', '#8fd9ff', { type: 'home' }, { fs: 16 });
+    this._btn('home', W / 2 - (P ? 160 : 110), P ? H - 90 : 546, P ? 320 : 220, 50,
+      '回 到 家 园', '#8fd9ff', { type: 'home' }, { fs: 16 });
   };
 
   /* ============================================================ */
@@ -399,71 +557,125 @@
 
   MetaView.prototype.drawHome = function (ctx) {
     _ctx = ctx;
-    var W = this.W, H = this.H, p = this.meta.profile;
-    bg(ctx, W, H);
+    bg(ctx, this.W, this.H);
+    if (this.portrait) this._homePortrait(ctx);
+    else this._homeLandscape(ctx);
+  };
 
-    // 顶部资源条
-    ctx.textAlign = 'left';
-    ctx.font = '900 24px "Noto Sans SC", system-ui, sans-serif';
-    ctx.fillStyle = '#eaf3ff';
-    ctx.fillText('星序家园', 32, 40);
-
-    var res = [['星尘', p.stardust, C.stardust], ['金币', p.gold, C.gold],
-    ['碎片', p.shard, C.shard], ['材料', p.material, C.material], ['晶核', p.core, C.core]];
-    ctx.textAlign = 'right';
-    var rx = W - 32;
-    for (var i = res.length - 1; i >= 0; i--) {
-      ctx.font = '900 15px system-ui, sans-serif';
-      ctx.fillStyle = res[i][2];
-      ctx.fillText(fmt(res[i][1]), rx, 32);
-      ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
-      ctx.fillStyle = '#6d819e';
-      ctx.fillText(res[i][0], rx, 48);
-      rx -= 96;
-    }
-
-    // Tab
+  /** 顶部四个 Tab（横竖屏共用，宽度自适应） */
+  MetaView.prototype._tabs = function (ctx, x, y, w, h) {
     var tabs = [['upgrade', '养成树'], ['garden', '花园'], ['shop', '商店'], ['codex', '图鉴']];
-    var tx = 32;
+    var gap = 6;
+    var tw = (w - gap * (tabs.length - 1)) / tabs.length;
+    var fs = h >= 34 ? 13 : 12.5;
     for (var t = 0; t < tabs.length; t++) {
       var on = this.tab === tabs[t][0];
-      var tw = 96;
-      global.roundRect(ctx, tx, 66, tw, 32, 9);
+      var tx = x + t * (tw + gap);
+      global.roundRect(ctx, tx, y, tw, h, 9);
       ctx.fillStyle = on ? 'rgba(143,217,255,.18)' : 'rgba(255,255,255,.04)';
       ctx.fill();
       ctx.strokeStyle = on ? '#8fd9ff' : 'rgba(255,255,255,.12)';
       ctx.lineWidth = on ? 2 : 1; ctx.stroke();
       ctx.textAlign = 'center';
-      ctx.font = '800 13px "Noto Sans SC", system-ui, sans-serif';
+      ctx.font = '800 ' + fs + 'px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = on ? '#eaf3ff' : '#8fa8c6';
-      ctx.fillText(tabs[t][1], tx + tw / 2, 83);
+      ctx.fillText(tabs[t][1], tx + tw / 2, y + h / 2);
       this.buttons.push({
-        id: 'tab' + t, x: tx, y: 66, w: tw, h: 32, col: '#8fd9ff',
+        id: 'tab' + t, x: tx, y: y, w: tw, h: h, col: '#8fd9ff',
         act: { type: 'tab', tab: tabs[t][0] }, label: tabs[t][1], disabled: false
       });
-      tx += tw + 8;
     }
+  };
+
+  /** 顶部资源条：从右往左排，数值在上、名字在下 */
+  MetaView.prototype._resBar = function (ctx, xRight, yNum, yName, gap, fsNum, fsName) {
+    var p = this.meta.profile;
+    var res = [['星尘', p.stardust, C.stardust], ['金币', p.gold, C.gold],
+    ['碎片', p.shard, C.shard], ['材料', p.material, C.material], ['晶核', p.core, C.core]];
+    ctx.save();
+    ctx.textAlign = 'right';
+    var rx = xRight;
+    for (var i = res.length - 1; i >= 0; i--) {
+      ctx.font = '900 ' + fsNum + 'px system-ui, sans-serif';
+      ctx.fillStyle = res[i][2];
+      ctx.fillText(fmt(res[i][1]), rx, yNum);
+      ctx.font = '600 ' + fsName + 'px "Noto Sans SC", system-ui, sans-serif';
+      ctx.fillStyle = '#6d819e';
+      ctx.fillText(res[i][0], rx, yName);
+      rx -= gap;
+    }
+    ctx.restore();
+  };
+
+  /** 底部「开始新的一局」+ 历史统计 */
+  MetaView.prototype._startBar = function (ctx, bw, bh, fs) {
+    var W = this.W, H = this.H, p = this.meta.profile;
+    this._btn('start', W / 2 - bw / 2, H - bh - 16, bw, bh, '开 始 新 的 一 局', '#9fe8b0',
+      { type: 'start' }, { fs: fs });
+    ctx.textAlign = 'center';
+    ctx.font = '600 10.5px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(140,165,195,.6)';
+    ctx.fillText('历史最佳：第 ' + (p.stats.bestLevel || 0) + ' 关 · 累计 ' +
+      (p.stats.runs || 0) + ' 局 · 累计击杀 ' + (p.stats.totalKills || 0),
+      W / 2, H - bh - 34);
+  };
+
+  /* ---- 横屏：原版布局 ---- */
+  MetaView.prototype._homeLandscape = function (ctx) {
+    var W = this.W, H = this.H;
+    ctx.textAlign = 'left';
+    ctx.font = '900 24px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#eaf3ff';
+    ctx.fillText('星序家园', 32, 40);
+    this._resBar(ctx, W - 32, 32, 48, 96, '15', '10');
+    this._tabs(ctx, 32, 66, 4 * 96 + 3 * 8, 32);
 
     if (this.tab === 'upgrade') this._upgradeTab(ctx, 32, 116, W - 64, H - 200);
     else if (this.tab === 'garden') this._gardenTab(ctx, 32, 116, W - 64, H - 200);
     else if (this.tab === 'shop') this._shopTab(ctx, 32, 116, W - 64, H - 200);
     else this._codexTab(ctx, 32, 116, W - 64, H - 200);
 
-    // 底部：开始新的一局
-    this._btn('start', W / 2 - 150, H - 68, 300, 52, '开 始 新 的 一 局', '#9fe8b0',
-      { type: 'start' }, { fs: 17 });
-    ctx.textAlign = 'center';
-    ctx.font = '600 10.5px "Noto Sans SC", system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(140,165,195,.6)';
-    ctx.fillText('历史最佳：第 ' + (p.stats.bestLevel || 0) + ' 关 · 累计 ' +
-      (p.stats.runs || 0) + ' 局 · 累计击杀 ' + (p.stats.totalKills || 0), W / 2, H - 82);
+    this._startBar(ctx, 300, 52, 17);
+  };
+
+  /* ---- 竖屏：资源条独占一行，Tab 拉满，内容区吃掉剩余高度 ---- */
+  MetaView.prototype._homePortrait = function (ctx) {
+    var W = this.W, H = this.H;
+    var pad = 20, cw = W - pad * 2;         // 500
+
+    ctx.textAlign = 'left';
+    ctx.font = '900 20px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#eaf3ff';
+    ctx.fillText('星序家园', pad, 32);
+
+    // 540 宽塞不下「标题 + 5 项资源」并排，资源条下移一行、字号收紧
+    this._resBar(ctx, W - pad, 56, 70, 92, '14', '9');
+
+    var tabY = 88, tabH = 34;
+    this._tabs(ctx, pad, tabY, cw, tabH);
+
+    var bodyY = tabY + tabH + 14;            // 136
+    var bodyH = H - bodyY - 120;             // 给底部按钮和统计留出位置
+
+    if (this.tab === 'upgrade') this._upgradeTab(ctx, pad, bodyY, cw, bodyH);
+    else if (this.tab === 'garden') this._gardenTab(ctx, pad, bodyY, cw, bodyH);
+    else if (this.tab === 'shop') this._shopTab(ctx, pad, bodyY, cw, bodyH);
+    else this._codexTab(ctx, pad, bodyY, cw, bodyH);
+
+    this._startBar(ctx, cw, 54, 17);
   };
 
   /* ---- 养成树 ---- */
   MetaView.prototype._upgradeTab = function (ctx, x, y, w, h) {
     var p = this.meta.profile, U = global.Meta.UPGRADES;
     var keys = ['root', 'branch', 'bud', 'fruit'];
-    var cw = (w - 3 * 16) / 4;
+    // 竖屏：4 列 → 2×2。540 宽下分 4 列每列只剩 ~122，卡片内的等级点阵（10 点×18）就放不下了
+    var cols = this.portrait ? 2 : 4;
+    var rows = Math.ceil(keys.length / cols);
+    var gap = this.portrait ? 14 : 16;
+    var cw = (w - gap * (cols - 1)) / cols;
+    var bh = (h - gap * (rows - 1)) / rows - (this.portrait ? 0 : 12);
+
     ctx.textAlign = 'left';
     ctx.font = '600 11.5px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#6d819e';
@@ -471,7 +683,8 @@
 
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i], u = U[k], lv = this.meta.upLevel(k);
-      var bx = x + i * (cw + 16), by = y, bh = h - 12;
+      var bx = x + (i % cols) * (cw + gap);
+      var by = y + Math.floor(i / cols) * (bh + gap);
       panel(ctx, bx, by, cw, bh, 14, 'rgba(10,16,26,.9)', hexA(u.color, 0.28));
 
       ctx.textAlign = 'center';
@@ -520,12 +733,24 @@
     ctx.textAlign = 'left';
     ctx.font = '600 11.5px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#6d819e';
-    ctx.fillText('花园 · 离线最多累计 ' + global.Meta.OFFLINE_CAP_H +
+    // 完整公式在 540 宽的屏上会顶出边界，竖屏只留结论
+    ctx.fillText(this.portrait
+      ? '花园 · 离线最多累计 ' + global.Meta.CAP.offlineH + ' 小时'
+      : '花园 · 离线最多累计 ' + global.Meta.CAP.offlineH +
       ' 小时 · 产出 = 稀有度基础 ×(1+星级×0.1) ×(1+花园等级×0.05) ×(1+果实加成)', x, y - 8);
 
-    var cw = (w - 5 * 14) / Math.max(1, p.pots);
+    // 竖屏：最多 6 个花盆一行排不下（每格只剩 ~71），改成 3 列 × 2 行
+    var pts = Math.max(1, p.pots);
+    var cols = this.portrait ? 3 : pts;
+    var rows = Math.ceil(pts / cols);
+    var gap = 14;
+    var rowGap = 12;
+    var cw = (w - gap * (cols - 1)) / cols;
+    var bh = this.portrait ? 244 : 220;
+
     for (var i = 0; i < p.pots; i++) {
-      var bx = x + i * (cw + 14), by = y, bh = 214;
+      var bx = x + (i % cols) * (cw + gap);
+      var by = y + Math.floor(i / cols) * (bh + rowGap);
       panel(ctx, bx, by, cw, bh, 14, 'rgba(10,16,26,.9)', 'rgba(127,224,192,.24)');
       var g = p.garden[i];
       ctx.textAlign = 'center';
@@ -536,7 +761,8 @@
         ctx.fillText('空 花 盆', bx + cw / 2, by + 40);
         // 选择植物
         var kinds = ['sprout', 'peashooter', 'cabbagepult'];
-        var ky = by + 68;
+        // 原来是 by+68，按这个起点「选时长」那排按钮会掉出面板底边，上移到 by+56
+        var ky = by + 56;
         ctx.font = '600 10.5px "Noto Sans SC", system-ui, sans-serif';
         ctx.fillStyle = '#8fa8c6';
         ctx.fillText(this.plantPick ? '再选时长种下' : '① 选植物', bx + cw / 2, ky - 10);
@@ -593,14 +819,15 @@
     }
 
     // 花园等级 / 统计
+    var fy = y + rows * (bh + rowGap) + 10;
     ctx.textAlign = 'left';
     ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#8fa8c6';
     ctx.fillText('花园等级 Lv.' + p.gardenLevel + '　花盆 ' + p.pots + ' / 6　' +
-      '累计产出 ' + (p.stats.totalStardust || 0) + ' 星尘', x, y + 240);
+      '累计产出 ' + (p.stats.totalStardust || 0) + ' 星尘', x, fy);
     ctx.font = '600 11px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#6d819e';
-    ctx.fillText('花盆扩容在「商店」购买；产出加成在「养成树 · 果实」分支。', x, y + 262);
+    ctx.fillText('花盆扩容在「商店」购买；产出加成在「养成树 · 果实」分支。', x, fy + 22);
   };
 
   /* ---- 商店 ---- */
@@ -612,12 +839,17 @@
     ctx.fillText('商店 · 只卖养成速度与容量，绝不卖局内战力（GDD v0.2 §4 红线）', x, y - 8);
 
     var items = global.Meta.SHOP;
-    var cw = (w - 16) / 2;
+    // 竖屏：2 列 → 1 列（每列只有 ~242，价格标签会和商品名挤到一起）
+    var cols = this.portrait ? 1 : 2;
+    var gap = 16, rowH = 74;
+    var rows = Math.ceil(items.length / cols);
+    var cw = (w - gap * (cols - 1)) / cols;
+
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       var st = m.shopItemState(it);
-      var bx = x + (i % 2) * (cw + 16);
-      var by = y + Math.floor(i / 2) * 74;
+      var bx = x + (i % cols) * (cw + gap);
+      var by = y + Math.floor(i / cols) * rowH;
       panel(ctx, bx, by, cw, 66, 12, 'rgba(10,16,26,.9)',
         st === 'owned' ? 'rgba(159,232,176,.4)' : 'rgba(140,180,230,.2)');
 
@@ -640,14 +872,14 @@
         { disabled: st !== 'buy', fs: 12 });
     }
 
-    // 元素地格状态
+    // 元素地格状态（竖屏地格多了会顶出右边界，字号收一档）
     ctx.textAlign = 'left';
-    ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+    ctx.font = '700 ' + (this.portrait ? 11 : 12) + 'px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#8fa8c6';
     ctx.fillText('已染棋盘元素地格：' + (p.boardHexes.length ?
       p.boardHexes.map(function (hx) {
         return '(' + (hx.c + 1) + ',' + (hx.r + 1) + ')' + global.Battlefield.ELEMENT_CN[hx.element];
-      }).join(' ') : '暂无'), x, y + 320);
+      }).join(' ') : '暂无'), x, y + rows * rowH + 16);
   };
 
   /* ---- 图鉴 ---- */
@@ -659,9 +891,13 @@
     ctx.fillText('图鉴 · 植物与昆虫', x, y - 8);
 
     var kinds = ['sprout', 'peashooter', 'cabbagepult'];
+    // 横屏沿用原版固定 178 宽 / 190 步进；竖屏改成 3 等分撑满 500
+    var bw = this.portrait ? (w - 20) / 3 : 178;
+    var step = this.portrait ? bw + 10 : 190;
+
     for (var i = 0; i < kinds.length; i++) {
       var k = kinds[i], pd = global.Meta.PLANTS[k];
-      var bx = x + i * 190, by = y, bw = 178, bh = 200;
+      var bx = x + i * step, by = y, bh = 200;
       panel(ctx, bx, by, bw, bh, 14, 'rgba(10,16,26,.9)', 'rgba(127,224,192,.24)');
       var A = global.PlantArt.Art ? global.PlantArt.Art.icon[k] : null;
       if (A) {
@@ -692,17 +928,20 @@
       ['fireant', '红火蚁', '高速低血，携带灼烧光晕'],
       ['beetle', '天牛', '高血高护甲，重甲单位']
     ];
+    var insY = this.portrait ? y + 216 : y + 224;
+    var insCY = this.portrait ? y + 232 : y + 240;
     ctx.textAlign = 'left';
     ctx.font = '800 13px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#eaf3ff';
-    ctx.fillText('昆虫', x, y + 224);
+    ctx.fillText('昆虫', x, insY);
     for (var j = 0; j < ins.length; j++) {
-      var bx2 = x + j * 190, by2 = y + 240;
-      panel(ctx, bx2, by2, 178, 150, 14, 'rgba(10,16,26,.9)', 'rgba(255,159,122,.22)');
+      var bx2 = x + j * step, by2 = insCY;
+      var cx2 = bx2 + bw / 2;
+      panel(ctx, bx2, by2, bw, 150, 14, 'rgba(10,16,26,.9)', 'rgba(255,159,122,.22)');
       var IA = global.InsectArt.Art ? global.InsectArt.Art[ins[j][0]] : null;
       if (IA) {
         ctx.save();
-        ctx.translate(bx2 + 89, by2 + 54);
+        ctx.translate(cx2, by2 + 54);
         global.PX.draw(ctx, IA, 0, 14, {
           frame: Math.floor(this.t * 9) % (IA.frames || 1), scale: 2.4
         });
@@ -711,14 +950,16 @@
       ctx.textAlign = 'center';
       ctx.font = '800 13px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = '#eaf3ff';
-      ctx.fillText(ins[j][1], bx2 + 89, by2 + 96);
+      ctx.fillText(ins[j][1], cx2, by2 + 96);
       ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = '#8fa8c6';
-      wrapC(ctx, ins[j][2], bx2 + 89, by2 + 118, 158, 14);
+      wrapC(ctx, ins[j][2], cx2, by2 + 118, bw - 20, 14);
     }
 
-    // 存档管理
-    this._btn('wipe', x + w - 130, y + 240, 130, 34, '清空存档', '#ff8f8f',
+    // 存档管理：竖屏昆虫卡占满三列，按钮挪到整块下方右侧
+    this._btn('wipe', this.portrait ? x + w - 110 : x + w - 130,
+      this.portrait ? y + 400 : y + 240,
+      this.portrait ? 110 : 130, 34, '清空存档', '#ff8f8f',
       { type: 'wipe' }, { fs: 12 });
   };
 

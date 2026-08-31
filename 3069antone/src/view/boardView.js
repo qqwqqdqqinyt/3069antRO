@@ -26,12 +26,29 @@
     this.layout();
   }
 
+  /**
+   * 棋盘落位。
+   * 关键：网格是正方形，但 region 不是 —— 顶部要留给标题，底部要留给步数 + 充能，
+   * 所以可用来画格子的高度是 region.h - topH - botH，而不是整个 region.h。
+   * 这样竖屏（region 又窄又矮）也能算出正确尺寸，不会把步数条顶出面板。
+   */
   BoardView.prototype.layout = function () {
     var r = this.region, n = this.board.n;
-    var size = Math.min(r.w, r.h) - this.pad * 2;
+    this.topH = 34;              // 标题行
+    this.botH = 76;              // 步数 + 充能
+    var maxW = r.w - this.pad * 2;
+    var maxH = r.h - this.topH - this.botH;
+    var size = Math.max(40, Math.min(maxW, maxH));
     this.cell = (size - this.gap * (n + 1)) / n;
     this.ox = r.x + (r.w - size) / 2 + this.gap;
-    this.oy = r.y + this.pad + this.gap;
+    this.oy = r.y + this.topH + this.gap;
+  };
+
+  /** 屏幕形状变化：换 region 并重算格子（缓存的方块动画位置作废，下一帧自动吸回） */
+  BoardView.prototype.relayout = function (region) {
+    this.region = region;
+    this.tilePos = {};
+    this.layout();
   };
 
   BoardView.prototype.cellX = function (c) { return this.ox + c * (this.cell + this.gap); };

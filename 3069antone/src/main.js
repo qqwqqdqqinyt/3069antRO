@@ -10,7 +10,8 @@
   'use strict';
   var EV = global.Bus.EV, M = global.M;
 
-  var W = 1040, H = 640;
+  var L = null;                 // 当前布局（由 Layout.compute 产出）
+  var W = 1040, H = 640;        // 当前逻辑画布尺寸 —— 由 L 决定，不再是常量
   var canvas, ctx, dpr = 1;
   // 局内系统（每次 buildWorld 重建）
   var board, battle, director, boardView, battleView, fx, loop;
@@ -29,6 +30,9 @@
     canvas = document.getElementById('game');
     setupCanvas();
     window.addEventListener('resize', setupCanvas);
+    window.addEventListener('orientationchange', setupCanvas);
+    // 手机地址栏收起/展开、软键盘弹出时 innerHeight 会变，也要跟着重排
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', setupCanvas);
 
     global.PlantArt.build();
     global.InsectArt.build();
@@ -55,17 +59,45 @@
     showHome();
   }
 
+  /**
+   * 按当前视口算出逻辑画布尺寸，并贴到 canvas 上。
+   * 只有「形状真的变了」（横竖屏切换 / 逻辑尺寸变化）才重排世界 ——
+   * 手机地址栏收放会疯狂触发 resize，不能每次都重建几何。
+   */
   function setupCanvas() {
+    var prev = L ? { portrait: L.portrait, W: L.W, H: L.H } : null;
+    L = global.Layout.compute(window.innerWidth, window.innerHeight);
+    W = L.W; H = L.H;
+
     dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = W * dpr; canvas.height = H * dpr;
-    var maxW = Math.min(window.innerWidth - 24, W);
-    canvas.style.width = maxW + 'px';
-    canvas.style.height = (maxW * H / W) + 'px';
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = L.cssW + 'px';
+    canvas.style.height = L.cssH + 'px';
+
+    // 改过 canvas.width 后 2D 上下文状态会重置，这几项必须重设
     ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.textBaseline = 'middle';
+
+    if (prev && (prev.portrait !== L.portrait || prev.W !== L.W || prev.H !== L.H)) {
+      relayoutWorld();
+    }
   }
+
+  /** 屏幕形状变了：把各系统几何迁到新布局，不重建世界（波次 / 血量 / 冷却全部保留） */
+  function relayoutWorld() {
+    if (!battle) return;
+    battle.relayout(rectOf(L.battle), L.battleCfg.nodeX);
+    if (battleView) battleView.relayout(rectOf(L.battle));
+    if (boardView) boardView.relayout(rectOf(L.board));
+    if (cardView) cardView.resize(W, H, L.portrait);
+    if (metaView) metaView.resize(W, H, L.portrait);
+    evolveMenu = null;             // 旧坐标已失效，直接收起
+  }
+
+  function rectOf(r) { return { x: r.x, y: r.y, w: r.w, h: r.h }; }
 
   /* ---------------- 顶层流程 ---------------- */
 
@@ -86,14 +118,15 @@
 
     // 局内系统（每次重建）
     battle = new global.Battlefield({
-      x: 14, y: 52, w: 596, h: 576, lanes: 3, cols: 4, nodeX: 58,
+      x: L.battle.x, y: L.battle.y, w: L.battle.w, h: L.battle.h,
+      lanes: L.battleCfg.lanes, cols: L.battleCfg.cols, nodeX: L.battleCfg.nodeX,
       seed: (Math.random() * 1e9) | 0
     });
     board = new global.Board2048({ n: 5, seed: (Math.random() * 1e9) | 0 });
     director = new global.Director({ board: board, battle: battle });
 
-    battleView = new global.BattleView(battle, { x: 14, y: 52, w: 596, h: 576 });
-    boardView = new global.BoardView(board, { x: 622, y: 52, w: 404, h: 576 });
+    battleView = new global.BattleView(battle, rectOf(L.battle));
+    boardView = new global.BoardView(board, rectOf(L.board));
     boardView.director = director;
 
     fx = new global.FX();
@@ -105,8 +138,8 @@
     run._bind();
 
     // 视图（每次重建，构造里重新订阅事件）
-    cardView = new global.CardView(cards, { w: W, h: H });
-    metaView = new global.MetaView(meta, run, { w: W, h: H, onStart: startRun });
+    cardView = new global.CardView(cards, { w: W, h: H, portrait: L.portrait });
+    metaView = new global.MetaView(meta, run, { w: W, h: H, portrait: L.portrait, onStart: startRun });
 
     // 卡牌：重置并让养成装饰器生效 → 广播 MOD_CHANGED 给各系统
     cards.reset();
@@ -182,29 +215,44 @@
       }
     });
 
-    var down = null;
+    var down = null, downId = null;
+
     canvas.addEventListener('pointerdown', function (e) {
       var p = toLogical(e);
       if (isModal()) {
+        // 模态层（选卡 / 家园 / 结算）：按下即响应，手感更跟手
         if (cardView.visible) cardView.onClick(p.x, p.y);
         else if (metaView && metaView.screen !== 'none') metaView.onClick(p.x, p.y);
         down = null;
         return;
       }
-      down = p;
-      if (handleClick(p)) down = null;
+      down = p; downId = e.pointerId;
+      // 捕获指针：手指滑出 canvas 也收得到 pointerup，不会「卡住」一次按下
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
     });
+
     canvas.addEventListener('pointerup', function (e) {
-      if (isModal()) { down = null; return; }
-      if (!down) return;
+      if (isModal()) { down = null; downId = null; return; }
+      if (!down || (downId !== null && e.pointerId !== downId)) return;
       var p = toLogical(e);
       var dx = p.x - down.x, dy = p.y - down.y;
       var ad = Math.abs(dx), ady = Math.abs(dy);
-      if (Math.max(ad, ady) > 26 && !battle.waveRunning) {
+      var far = Math.max(ad, ady) > (L ? L.swipe : 26);
+
+      if (far) {
+        // 滑动 = 合成。
+        // 原代码这里多挂了一个 !battle.waveRunning 的门槛：波次一开就滑不动，
+        // 而波次是自动推进的（间隔仅 2.6s），等于绝大多数时间无法合成。已去掉。
         global.Bus.emit(EV.CMD_MOVE, { dir: ad > ady ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up') });
+      } else {
+        // 局内点击一律等到抬手再判定，且位移足够小才算点击 ——
+        // 否则在战场上滑动合成时，起点落在植物上就会顺手种一棵。
+        handleClick(p);
       }
-      down = null;
+      down = null; downId = null;
     });
+
+    canvas.addEventListener('pointercancel', function () { down = null; downId = null; });
     canvas.addEventListener('pointermove', function (e) {
       var p = toLogical(e);
       if (cardView && cardView.visible) cardView.onMove(p.x, p.y);
@@ -212,13 +260,48 @@
     });
   }
 
+  /**
+   * 生成进化菜单两项的位置。
+   *
+   * 关键取舍：菜单既要贴着被点的植物，又不能越出屏幕 / 被战场边缘切掉。
+   * 这里用「整体平移」而不是逐项 clamp —— 逐项 clamp 会把两项朝中间挤，
+   * 在竖屏（车道只有 ~102 高，而两张卡片就要 64×2）会直接叠在一起。
+   */
+  function makeEvolveMenu(best) {
+    var bc = battle.cfg;
+    var half = (L && L.small) ? 32 : 36;     // 卡片半高，竖屏小一号
+    var span = half * 2 + 2;                 // 两项中心间距：刚好不重叠
+    var pad = (L ? L.pad : 14) + 2;
+
+    // 横向：默认挂植物右侧，右边放不下就翻到左侧
+    var mx = best.x + half + 16;
+    if (mx + half > W - pad) mx = best.x - half - 16;
+    mx = Math.max(pad + half, Math.min(W - pad - half, mx));
+
+    // 纵向：以植物为中心上下各一项，越界则整体平移（保住间距不变）
+    var top = best.y - span / 2, bot = top + span;
+    var minY = bc.y + half + 2, maxY = bc.y + bc.h - half - 2;
+    if (top < minY) { bot += minY - top; top = minY; }
+    if (bot > maxY) { top -= bot - maxY; bot = maxY; }
+    top = Math.max(minY, top);
+
+    return {
+      lane: best.lane, col: best.col, x: best.x, y: best.y, t: 0, half: half,
+      items: [
+        { kind: 'peashooter', x: mx, y: top },
+        { kind: 'cabbagepult', x: mx, y: top + span }
+      ]
+    };
+  }
+
   function handleClick(p) {
     // 进化菜单优先
     if (evolveMenu) {
       var m = evolveMenu, hit = null;
+      var hh = (m.half || 36) + 4;
       for (var i = 0; i < m.items.length; i++) {
         var it = m.items[i];
-        if (Math.abs(p.x - it.x) < 40 && Math.abs(p.y - it.y) < 40) { hit = it; break; }
+        if (Math.abs(p.x - it.x) < hh && Math.abs(p.y - it.y) < hh) { hit = it; break; }
       }
       if (hit) {
         if (director.currency.gold >= PLANT_COST[hit.kind]) {
@@ -234,8 +317,9 @@
       return true;
     }
 
-    // 点击战场内的植物/空位
-    if (p.x >= 14 && p.x <= 610 && p.y >= 52 && p.y <= 628) {
+    // 点击战场内的植物/空位（边界取自战场自己的 cfg，不再写死 14/610/52/628）
+    var bc = battle.cfg;
+    if (p.x >= bc.x && p.x <= bc.x + bc.w && p.y >= bc.y && p.y <= bc.y + bc.h) {
       var best = null, bd = 1e9;
       for (var l = 0; l < battle.cfg.lanes; l++) {
         for (var c = 0; c < battle.cfg.cols; c++) {
@@ -247,13 +331,7 @@
       if (!best) return false;
       var plant = battle.plants.filter(function (q) { return q.lane === best.lane && q.col === best.col; })[0];
       if (plant && plant.kind === 'sprout') {
-        evolveMenu = {
-          lane: best.lane, col: best.col, x: best.x, y: best.y, t: 0,
-          items: [
-            { kind: 'peashooter', x: best.x + 52, y: best.y - 46 },
-            { kind: 'cabbagepult', x: best.x + 52, y: best.y + 6 }
-          ]
-        };
+        evolveMenu = makeEvolveMenu(best);
         return true;
       }
       if (!plant) {
@@ -358,15 +436,6 @@
   }
 
   function drawHeader() {
-    ctx.save();
-    ctx.font = '900 17px "Noto Sans SC", system-ui, sans-serif';
-    ctx.fillStyle = '#eaf3ff'; ctx.textAlign = 'left';
-    ctx.fillText('星序防线', 16, 26);
-    ctx.font = '600 11px system-ui, sans-serif';
-    ctx.fillStyle = '#7d95b5';
-    ctx.fillText('2048 合成 × 塔防 · v0.2 原型', 92, 26);
-
-    // 货币
     var c = director.currency;
     var items = [
       ['星核', Math.floor(c.star), '#b9a6ff'],
@@ -375,25 +444,56 @@
       ['晶核', c.core, '#6fd6ff'],
       ['材料', c.material, '#ffb08a']
     ];
-    var x = W - 16;
-    ctx.textAlign = 'right';
-    for (var i = items.length - 1; i >= 0; i--) {
-      var it = items[i];
-      ctx.font = '800 13px system-ui, sans-serif';
-      ctx.fillStyle = it[2];
-      ctx.fillText(it[1], x, 20);
-      ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
-      ctx.fillStyle = '#6d819e';
-      ctx.fillText(it[0], x, 34);
-      x -= Math.max(62, ctx.measureText(it[1]).width + 46);
+    var hx = (L && L.header) ? L.header : { x: 16, y: 0, w: W - 32, h: 44 };
+    ctx.save();
+
+    if (L && L.portrait) {
+      // 竖屏只有 540 宽：副标题让位，货币从「数值 / 名字」两行压成「名字 数值」一行，
+      // 从右往左排，能排下 5 项且不撞到标题
+      ctx.font = '900 15px "Noto Sans SC", system-ui, sans-serif';
+      ctx.fillStyle = '#eaf3ff'; ctx.textAlign = 'left';
+      ctx.fillText('星序防线', hx.x, 24);
+
+      var x = hx.x + hx.w;
+      ctx.textAlign = 'right';
+      for (var k = items.length - 1; k >= 0; k--) {
+        var o = items[k];
+        var label = o[0] + ' ' + o[1];
+        ctx.font = '800 12px "Noto Sans SC", system-ui, sans-serif';
+        var lw = ctx.measureText(label).width;
+        ctx.fillStyle = o[2];
+        ctx.fillText(label, x, 24);
+        x -= lw + 13;
+      }
+    } else {
+      ctx.font = '900 17px "Noto Sans SC", system-ui, sans-serif';
+      ctx.fillStyle = '#eaf3ff'; ctx.textAlign = 'left';
+      ctx.fillText('星序防线', hx.x, 26);
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.fillStyle = '#7d95b5';
+      ctx.fillText('2048 合成 × 塔防 · v0.2 原型', hx.x + 76, 26);
+
+      var x2 = hx.x + hx.w;
+      ctx.textAlign = 'right';
+      for (var i = items.length - 1; i >= 0; i--) {
+        var it = items[i];
+        ctx.font = '800 13px system-ui, sans-serif';
+        ctx.fillStyle = it[2];
+        ctx.fillText(it[1], x2, 20);
+        ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
+        ctx.fillStyle = '#6d819e';
+        ctx.fillText(it[0], x2, 34);
+        x2 -= Math.max(62, ctx.measureText(it[1]).width + 46);
+      }
     }
     ctx.restore();
   }
 
   function drawWheel() {
-    var R = boardView.region;
-    var y = R.y + R.h - 46;
-    var cy = y;
+    // 竖屏：轮盘独占屏幕底部一块「控制台」；横屏：沿用原版，画在棋盘面板内的底部
+    var wheel = (L && L.portrait) ? L.wheel : null;
+    var R = wheel || boardView.region;
+    var cy = wheel ? (wheel.y + 34) : (R.y + R.h - 46);
     var r = 19, gap = 8;
     var n = director.roulette.length;
     var totalW = n * (r * 2 + gap) - gap;
@@ -401,6 +501,11 @@
     var rects = [];
 
     ctx.save();
+    if (wheel) {
+      global.roundRect(ctx, wheel.x, wheel.y, wheel.w, wheel.h, 14);
+      ctx.fillStyle = 'rgba(20,32,52,.88)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(120,170,230,.22)'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
     ctx.font = '700 11px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#7d95b5'; ctx.textAlign = 'center';
     ctx.fillText('元素轮盘（点击更换 · 连续同元素触发共鸣）', R.x + R.w / 2, cy - r - 12);
@@ -469,39 +574,50 @@
 
   function drawEvolveMenu() {
     var m = evolveMenu;
+    var half = m.half || 36;
     ctx.save();
     // 连线
     ctx.strokeStyle = 'rgba(216,255,192,.6)'; ctx.lineWidth = 1.5;
     for (var i = 0; i < m.items.length; i++) {
       ctx.beginPath();
-      ctx.moveTo(m.x, m.y - 14); ctx.lineTo(m.items[i].x - 34, m.items[i].y);
+      ctx.moveTo(m.x, m.y - 14); ctx.lineTo(m.items[i].x - half, m.items[i].y);
       ctx.stroke();
     }
     for (var j = 0; j < m.items.length; j++) {
       var it = m.items[j];
       var afford = director.currency.gold >= PLANT_COST[it.kind];
       ctx.globalAlpha = afford ? 1 : 0.45;
-      global.roundRect(ctx, it.x - 36, it.y - 36, 72, 72, 12);
+      global.roundRect(ctx, it.x - half, it.y - half, half * 2, half * 2, 12);
       ctx.fillStyle = 'rgba(14,26,18,.94)'; ctx.fill();
       ctx.strokeStyle = afford ? '#9fe8b0' : '#6d819e'; ctx.lineWidth = 2; ctx.stroke();
 
       var icon = global.PlantArt.Art.icon[it.kind];
-      global.PX.draw(ctx, icon, it.x, it.y + 24, { frame: 0, scale: 1.5 });
+      global.PX.draw(ctx, icon, it.x, it.y + half * 0.56, { frame: 0, scale: half / 24 });
 
       ctx.font = '800 10px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = '#dff3d8'; ctx.textAlign = 'center';
-      ctx.fillText(global.PlantArt.KIND[it.kind].name, it.x, it.y + 29);
+      ctx.fillText(global.PlantArt.KIND[it.kind].name, it.x, it.y + half * 0.81);
       ctx.font = '800 10px system-ui, sans-serif';
       ctx.fillStyle = afford ? '#ffd45e' : '#ff8f8f';
-      ctx.fillText(PLANT_COST[it.kind] + ' 金', it.x, it.y - 26);
+      ctx.fillText(PLANT_COST[it.kind] + ' 金', it.x, it.y - half * 0.66);
     }
     ctx.restore();
   }
 
   function drawHelp() {
     ctx.save();
-    ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(140,165,195,.75)';
+    if (L && L.portrait) {
+      // 竖屏底部空白没了（那里是轮盘控制台），提示压进控制台下方的空档；
+      // 同时砍掉键盘说明 —— 手机上既没有方向键也没有 R 键
+      ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('滑动 = 合成　点空位 = 种牙苗(' + PLANT_COST.sprout + '金)　点牙苗 = 进化',
+        W / 2, L.wheel.y + 64);
+      ctx.restore();
+      return;
+    }
+    ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('方向键/滑动 = 合成　空格 = 立即开波　点击牙苗 = 进化　点击空位 = 种牙苗(' + PLANT_COST.sprout + '金)　R = 重开', 16, H - 10);
     ctx.restore();
@@ -520,12 +636,19 @@
     get board() { return board; },
     get battle() { return battle; },
     get director() { return director; },
+    get boardView() { return boardView; },
+    get battleView() { return battleView; },
+    get layout() { return L; },
     get cards() { return cards; },
     get cardView() { return cardView; },
     get metaView() { return metaView; },
     get run() { return run; },
     get meta() { return meta; },
     startRun: startRun,
-    showHome: showHome
+    showHome: showHome,
+    // 给测试/编辑器用：算出指定格位上进化菜单的落点（不产生副作用）
+    makeEvolveMenu: function (lane, col) {
+      return makeEvolveMenu({ lane: lane, col: col, x: battle.slotX(col), y: battle.slotY(lane) });
+    }
   };
 })(window);

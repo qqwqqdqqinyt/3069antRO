@@ -72,7 +72,7 @@ vm.createContext(sandbox);
 
 const BASE = path.join(__dirname, '..', '3069antone');
 const FILES = [
-  'src/core/bus.js', 'src/core/rng.js', 'src/core/loop.js',
+  'src/core/bus.js', 'src/core/rng.js', 'src/core/loop.js', 'src/core/layout.js',
   'src/art/pixel.js', 'src/art/plantArt.js', 'src/art/insectArt.js', 'src/art/fx.js',
   'src/systems/board2048.js', 'src/systems/battlefield.js', 'src/systems/director.js',
   'src/systems/cards.js', 'src/systems/run.js', 'src/systems/meta.js',

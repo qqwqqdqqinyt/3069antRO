@@ -126,6 +126,38 @@
   Battlefield.prototype.slotX = function (col) { return this.cfg.x + this.cfg.nodeX + 40 + this.cellW * (col + 0.5); };
   Battlefield.prototype.slotY = function (lane) { return this.laneY(lane); };
 
+  /**
+   * 屏幕形状变化（横竖屏切换 / 窗口缩放）时重新落位。
+   * 不重建世界 —— 波次、血量、冷却全部保留，只把几何映射过去。
+   * @param {{x,y,w,h}} rect 新的战场矩形
+   * @param {number} [nodeX] 星枢距左边界的距离
+   */
+  Battlefield.prototype.relayout = function (rect, nodeX) {
+    var old = { x: this.cfg.x, w: this.cfg.w };
+    this.cfg.x = rect.x; this.cfg.y = rect.y;
+    this.cfg.w = rect.w; this.cfg.h = rect.h;
+    if (nodeX !== undefined && nodeX !== null) this.cfg.nodeX = nodeX;
+    this._layout();
+
+    // 植物：格子坐标是逻辑的（lane/col），直接按新几何重算即可
+    for (var i = 0; i < this.plants.length; i++) {
+      var p = this.plants[i];
+      p.x = this.slotX(p.col);
+      p.y = this.slotY(p.lane);
+    }
+
+    // 敌人：y 用出生时的车道内偏移还原；x 按新旧宽度等比映射，保证「走到哪了」的比例不变
+    var k = old.w > 0 ? (this.cfg.w / old.w) : 1;
+    for (var j = 0; j < this.enemies.length; j++) {
+      var e = this.enemies[j];
+      e.x = this.cfg.x + (e.x - old.x) * k;
+      e.y = this.laneY(e.lane) + (e._yOff || 0);
+    }
+
+    // 飞行中的投射物：坐标系已变，直接丢弃（视觉上一帧的损失，不影响任何状态）
+    this.projectiles.length = 0;
+  };
+
   Battlefield.prototype._bind = function () {
     var self = this;
     global.Bus.on(EV.CMD_DAMAGE_POOL, function (p) { self.applyDamagePool(p); }, this);
@@ -250,9 +282,11 @@
     var sc = this.levelScale();
     var lane = this.rng.int(0, this.cfg.lanes - 1);
     var hp = Math.round(R.hp * sc.hp);
+    // 车道内的垂直抖动单独存一份：relayout 时要用它把 y 还原回去
+    var yOff = this.rng.range(-6, 6);
     var e = {
       id: this._uid++, role: role, kind: R.kind, name: R.name,
-      lane: lane, x: this.spawnX + this.rng.range(0, 40), y: this.laneY(lane) + this.rng.range(-6, 6),
+      lane: lane, x: this.spawnX + this.rng.range(0, 40), y: this.laneY(lane) + yOff, _yOff: yOff,
       hp: hp, maxHp: hp, baseSpeed: R.speed * sc.spd, dmg: R.dmg * sc.dmg,
       armor: R.armor, scale: R.scale, gold: R.gold,
       anim: new global.InsectArt.InsectAnimator(R.kind, R.speed, this.rng.next() * 10),

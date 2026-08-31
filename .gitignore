@@ -4,6 +4,8 @@
 # 2.放行需要上传的文件夹（前面加 !）
 !/3069antone/
 !/debug/
+!/editor/
+!/docs/
 
 # 放行根目录文件，例如readme：  !/readme.md
 

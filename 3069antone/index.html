@@ -2,16 +2,30 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<!-- viewport-fit=cover：让画布延伸到刘海屏/挖孔屏的安全区之外 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#070c15">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>星序防线 · 2048 × 塔防</title>
 <style>
   html, body {
-    margin: 0; padding: 0; height: 100%;
+    margin: 0; padding: 0;
+    height: 100%;
+    /* dvh：手机地址栏收放时不会把画布顶出屏幕（不支持的浏览器回落到 100%） */
+    height: 100dvh;
     background: #070c15;
     color: #dbe8f7;
     font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
+    /* 手机端三件套：禁长按菜单、禁文本选中、禁下拉刷新 / 橡皮筋回弹 */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    overscroll-behavior: none;
+    touch-action: manipulation;
   }
   #wrap {
     width: 100%; height: 100%;
@@ -23,9 +37,10 @@
     image-rendering: crisp-edges;
     border-radius: 14px;
     box-shadow: 0 18px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(120,170,230,.18);
+    /* none 而非 manipulation：游戏要吃掉全部手势，绝不能交给浏览器去滚动/缩放 */
     touch-action: none;
     cursor: pointer;
-    max-height: 100vh;
+    max-width: 100vw;
   }
   #loading {
     position: fixed; inset: 0;
@@ -53,6 +68,7 @@
 <script src="src/core/bus.js"></script>
 <script src="src/core/rng.js"></script>
 <script src="src/core/loop.js"></script>
+<script src="src/core/layout.js"></script>
 <script src="src/art/pixel.js"></script>
 <script src="src/art/plantArt.js"></script>
 <script src="src/art/insectArt.js"></script>
