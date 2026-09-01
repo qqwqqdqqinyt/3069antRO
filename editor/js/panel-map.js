@@ -12,8 +12,9 @@
   var CW = 86, CH = 92, PAD = 26;
   var P = {
     root: null, host: null, cv: null, ctx: null,
-    brush: 'slot', painting: false, erasing: false,
-    showCoord: true, statHost: null, warnHost: null
+    brush: 'slot', brushKind: 'tile', painting: false, erasing: false,
+    selObs: null, showCoord: true, statHost: null, warnHost: null, obsHost: null, shapeCv: null,
+    shape: { drag: -1, addMode: false }
   };
 
   function L() { return D.cur(); }
@@ -34,6 +35,57 @@
       L().plants = L().plants.filter(function (p) { return !(p.lane === lane && p.col === col); });
     }
     D.emit('map');
+  }
+
+  /* ---------------- 障碍物（独立于地块的一层物件） ---------------- */
+  function cellXY(lane, col) {
+    return { x: PAD + 26 + col * CW, y: PAD + lane * CH };
+  }
+
+  /** 在指定格内，把归一化多边形点映射成像素坐标 */
+  function ptsToPx(o, lane, col) {
+    var r = cellXY(lane, col);
+    return o.shape.pts.map(function (p) {
+      return { x: r.x + p.x * CW, y: r.y + p.y * CH };
+    });
+  }
+
+  function drawObstacles(ctx) {
+    var list = L().obstacles || [];
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      var def = D.OBSTACLES[o.kind] || D.OBSTACLES.rock;
+      var r = cellXY(o.lane, o.col);
+      var pts = ptsToPx(o, o.lane, o.col);
+
+      ctx.save();
+      if (o.applied === false) ctx.globalAlpha = 0.32;     // 未应用：半透明虚线提示
+
+      // 填充多边形
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (var k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+      ctx.closePath();
+      ctx.fillStyle = def.color;
+      ctx.fill();
+      ctx.lineWidth = (o === P.selObs) ? 2.4 : 1.4;
+      ctx.strokeStyle = (o === P.selObs) ? '#ffd45e' : def.edge;
+      ctx.stroke();
+
+      // 应用/未应用标记
+      ctx.globalAlpha = o.applied === false ? 0.7 : 1;
+      ctx.fillStyle = o.applied === false ? '#ffcaca' : '#e8eefc';
+      ctx.font = '700 9px system-ui'; ctx.textAlign = 'left';
+      ctx.fillText(o.applied === false ? '✕' : '✓', r.x + 4, r.y + 12);
+
+      // 自定义碰撞层标记
+      if (D.obsCustom(o)) {
+        ctx.fillStyle = '#9fe0ff';
+        ctx.font = '700 9px system-ui';
+        ctx.fillText('⚙', r.x + CW - 14, r.y + 12);
+      }
+      ctx.restore();
+    }
   }
 
   /* ---------------- 绘制 ---------------- */
@@ -161,6 +213,7 @@
     ctx.fillText('来敌', PAD + 26 + m.cols * CW + 18, PAD + m.lanes * CH / 2 - 6);
     ctx.fillText('方向', PAD + 26 + m.cols * CW + 18, PAD + m.lanes * CH / 2 + 8);
 
+    drawObstacles(ctx);
     renderStats();
   }
 
@@ -211,6 +264,24 @@
     P.statHost.appendChild(U.h('div', { class: 'stat-line' }, [
       U.h('span', { class: 'muted', text: '已布防植物' }), U.h('b', { text: String(L().plants.length) })
     ]));
+
+    // 障碍物统计
+    var obs = L().obstacles || [];
+    var oc = {}, appliedN = 0;
+    obs.forEach(function (o) { oc[o.kind] = (oc[o.kind] || 0) + 1; if (o.applied !== false) appliedN++; });
+    P.statHost.appendChild(U.h('hr', { class: 'sep' }));
+    P.statHost.appendChild(U.h('div', { class: 'stat-line' }, [
+      U.h('span', { class: 'muted', text: '障碍物（已应用 / 共）' }),
+      U.h('b', { text: appliedN + ' / ' + obs.length })
+    ]));
+    D.OBSTACLE_KEYS.forEach(function (k) {
+      if (!oc[k]) return;
+      P.statHost.appendChild(U.h('div', { class: 'stat-line' }, [
+        U.h('span', { class: 'muted', text: D.OBSTACLES[k].name }),
+        U.h('b', { text: String(oc[k]) })
+      ]));
+    });
+
     P.statHost.appendChild(U.h('div', { class: 'stat-line' }, [
       U.h('span', { class: 'muted', text: '地图尺寸' }), U.h('b', { text: m.lanes + ' × ' + m.cols })
     ]));
@@ -241,7 +312,31 @@
   function paint(ev) {
     var c = cellFromEvent(ev);
     if (!c) return;
-    setTile(c.lane, c.col, P.erasing ? 'grass' : P.brush);
+
+    if (P.erasing) {
+      var o = D.obsAt(c.lane, c.col);
+      if (o) {
+        D.obsRemove(o);
+        if (P.selObs === o) P.selObs = null;
+        P.renderObsPanel();
+      } else {
+        setTile(c.lane, c.col, 'grass');
+      }
+      render();
+      return;
+    }
+
+    if (P.brushKind === 'obstacle') {
+      var ex = D.obsAt(c.lane, c.col);
+      if (ex) {
+        P.selObs = ex;                  // 已有 → 选中编辑，不改种类
+      } else {
+        P.selObs = D.obsAdd(c.lane, c.col, P.brush);
+      }
+      P.renderObsPanel();
+    } else {
+      setTile(c.lane, c.col, P.brush);
+    }
     render();
   }
 
@@ -292,17 +387,33 @@
     var wrap = U.h('div', { class: 'map-wrap' });
     var side = U.h('div', { class: 'side', style: { flex: '0 0 330px' } });
 
-    /* 调色板 */
+    /* 调色板（地块 + 障碍物 两个分组） */
     var palHost = U.h('div', { class: 'palette' });
     function renderPalette() {
       U.clear(palHost);
+      U.h && palHost.appendChild(U.h('div', { class: 'pal-h', text: '地块' }));
       D.TILE_KEYS.forEach(function (k) {
         var t = D.TILES[k];
         palHost.appendChild(U.h('div', {
-          class: 'pal' + (P.brush === k ? ' on' : ''),
-          on: { click: function () { P.brush = k; renderPalette(); } }
+          class: 'pal' + (P.brushKind === 'tile' && P.brush === k ? ' on' : ''),
+          on: { click: function () { P.brushKind = 'tile'; P.brush = k; renderPalette(); } }
         }, [
           U.h('span', { class: 'sw', style: { background: t.color } }),
+          U.h('div', {}, [
+            U.h('div', { class: 'nm', text: t.name }),
+            U.h('div', { class: 'ds', text: t.desc })
+          ])
+        ]));
+      });
+
+      palHost.appendChild(U.h('div', { class: 'pal-h', text: '障碍物（点击格子放置 / 选中）' }));
+      D.OBSTACLE_KEYS.forEach(function (k) {
+        var t = D.OBSTACLES[k];
+        palHost.appendChild(U.h('div', {
+          class: 'pal' + (P.brushKind === 'obstacle' && P.brush === k ? ' on' : ''),
+          on: { click: function () { P.brushKind = 'obstacle'; P.brush = k; renderPalette(); } }
+        }, [
+          U.h('span', { class: 'sw', style: { background: t.color, border: '1px solid ' + t.edge } }),
           U.h('div', {}, [
             U.h('div', { class: 'nm', text: t.name }),
             U.h('div', { class: 'ds', text: t.desc })
@@ -395,7 +506,11 @@
       P.painting = true; paint(ev);
     });
     c.canvas.addEventListener('mousemove', function (ev) { if (P.painting) paint(ev); });
-    P.onUp = function () { P.painting = false; P.erasing = false; };
+    P.onUp = function () {
+      P.painting = false; P.erasing = false;
+      P.shape.drag = -1;
+      if (P.shape.repaint) P.shape.repaint();
+    };
     window.addEventListener('mouseup', P.onUp);
     box.appendChild(c.canvas);
     wrap.appendChild(box);
@@ -408,6 +523,7 @@
       palHost
     ]));
     side.appendChild(U.h('div', { class: 'card' }, [P.statHost = U.h('div')]));
+    side.appendChild(U.h('div', { class: 'card' }, [P.obsHost = U.h('div')]));
     side.appendChild(U.h('div', { class: 'card' }, [P.warnHost = U.h('div')]));
     side.appendChild(U.h('div', { class: 'card' }, [
       U.h('div', { class: 'h' }, [U.h('span', { text: '说明' })]),
@@ -424,7 +540,158 @@
       ])
     ]));
 
+    /* ---------------- 障碍物属性面板 ---------------- */
+    function renderObsPanel() {
+      var host = P.obsHost;
+      U.clear(host);
+      host.appendChild(U.h('div', { class: 'h' }, [
+        U.h('span', { text: '障碍物属性' }),
+        P.selObs ? U.h('span', { class: 'sub', text: P.selObs.id }) : null
+      ]));
+
+      if (!P.selObs) {
+        host.appendChild(U.h('div', { class: 'muted', style: { marginTop: '6px' },
+          text: '用「障碍物」笔刷点击地图格子放置；点击已有障碍物可选中编辑。右键 / Alt 删除。' }));
+        P.shapeCv = null;
+        return;
+      }
+      var o = P.selObs;
+
+      // 类型
+      var kindSel = U.h('select', { on: { change: function () {
+        o.kind = this.value; P.brush = o.kind; renderObsPanel(); render();
+      } } }, D.OBSTACLE_KEYS.map(function (k) {
+        return U.h('option', { value: k, text: D.OBSTACLES[k].name, selected: k === o.kind });
+      }));
+      host.appendChild(U.h('div', { class: 'row', style: { marginTop: '6px' } }, [
+        U.h('span', { class: 'muted', text: '类型' }), kindSel
+      ]));
+
+      // 应用开关
+      var appCb = U.h('input', { type: 'checkbox', checked: o.applied !== false, on: { change: function () {
+        o.applied = this.checked; render(); renderObsPanel();
+      } } });
+      host.appendChild(U.h('label', { class: 'f', style: { cursor: 'pointer', marginTop: '4px' } }, [
+        appCb, U.h('span', { text: '应用于游戏（取消勾选则不导出、不预览）', style: { minWidth: '0' } })
+      ]));
+
+      // 碰撞层：敌人类别 × 弹道类型
+      host.appendChild(U.h('hr', { class: 'sep' }));
+      host.appendChild(U.h('div', { class: 'h' }, [U.h('span', { text: '碰撞层' })]));
+      host.appendChild(U.h('div', { class: 'muted', style: { marginBottom: '4px' },
+        text: '分别框选：敌人走不过来 / 植物弹道被截断。' }));
+
+      Object.keys(D.LAYER_META).forEach(function (layer) {
+        var meta = D.LAYER_META[layer];
+        host.appendChild(U.h('div', { class: 'col-h', text: meta.name }));
+        meta.items.forEach(function (it) {
+          var cur = D.obsLayer(o, layer)[it[0]];
+          var cb = U.h('input', { type: 'checkbox', checked: !!cur, on: { change: function () {
+            D.obsSetBlock(o, layer, it[0], this.checked ? 1 : 0); renderObsPanel();
+          } } });
+          var defVal = (D.COLLIDE_DEFAULT[o.kind] || {})[layer];
+          var isCustom = !(o.collide && o.collide[layer] && (it[0] in o.collide[layer]));
+          host.appendChild(U.h('div', { class: 'row', style: { marginTop: '2px', alignItems: 'center' } }, [
+            cb, U.h('span', { text: it[1], style: { minWidth: '0', flex: '1' } }),
+            isCustom ? U.h('span', { class: 'tag', style: { opacity: '.7' }, text: '默认' })
+              : U.h('span', { class: 'lnk', text: '↺', title: '恢复为类型默认',
+                  on: { click: function () { D.obsSetBlock(o, layer, it[0], null); renderObsPanel(); } } })
+          ]));
+        });
+      });
+
+      // 形状（多边形顶点编辑）
+      host.appendChild(U.h('hr', { class: 'sep' }));
+      host.appendChild(U.h('div', { class: 'h' }, [
+        U.h('span', { text: '形状（格内顶点）' }),
+        U.h('span', { class: 'sub', text: o.shape.pts.length + ' 顶点' })
+      ]));
+      host.appendChild(U.h('div', { class: 'muted', style: { marginBottom: '4px' },
+        text: '拖动顶点改形状；「加顶点」后点击区域新增。' }));
+
+      var sc = U.mkCanvas(132, 132);
+      P.shapeCv = sc;
+      drawShapeEditor();
+      host.appendChild(sc.canvas);
+
+      var addBtn = U.h('button', {
+        class: 'btn sm' + (P.shape.addMode ? ' primary' : ''), text: P.shape.addMode ? '点击区域加顶点…' : '＋ 加顶点',
+        on: { click: function () { P.shape.addMode = !P.shape.addMode; renderObsPanel(); } }
+      });
+      var delBtn = U.h('button', { class: 'btn sm', text: '－ 删末顶点',
+        on: { click: function () { if (o.shape.pts.length > 3) D.obsSetPts(o, o.shape.pts.slice(0, -1)); render(); renderObsPanel(); } } });
+      var resetBtn = U.h('button', { class: 'btn sm', text: '重置矩形',
+        on: { click: function () { D.obsResetShape(o); render(); renderObsPanel(); } } });
+      host.appendChild(U.h('div', { class: 'row wrap', style: { marginTop: '4px' } }, [addBtn, delBtn, resetBtn]));
+
+      function drawShapeEditor() {
+        P.shape.repaint = drawShapeEditor;
+        var ctx = sc.ctx, n = sc.w;
+        ctx.clearRect(0, 0, n, n);
+        ctx.fillStyle = 'rgba(255,255,255,.04)'; ctx.fillRect(0, 0, n, n);
+        ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.strokeRect(0.5, 0.5, n - 1, n - 1);
+        var def = D.OBSTACLES[o.kind] || D.OBSTACLES.rock;
+        var pts = o.shape.pts.map(function (p) { return { x: 6 + p.x * (n - 12), y: 6 + p.y * (n - 12) }; });
+        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+        for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        ctx.fillStyle = def.color; ctx.fill();
+        ctx.lineWidth = 1.4; ctx.strokeStyle = def.edge; ctx.stroke();
+        pts.forEach(function (p, i) {
+          ctx.beginPath(); ctx.arc(p.x, p.y, i === P.shape.drag ? 6 : 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = i === P.shape.drag ? '#ffd45e' : '#e8eefc'; ctx.fill();
+        });
+      }
+
+      function scPos(ev) {
+        var r = sc.canvas.getBoundingClientRect();
+        var x = (ev.clientX - r.left) * (sc.w / r.width);
+        var y = (ev.clientY - r.top) * (sc.h / r.height);
+        return { x: x, y: y };
+      }
+      sc.canvas.addEventListener('mousedown', function (ev) {
+        var p = scPos(ev);
+        // 加顶点模式：在区域内点击新增
+        if (P.shape.addMode) {
+          P.shape.addMode = false;
+          var nx = Math.max(0, Math.min(1, (p.x - 6) / (sc.w - 12)));
+          var ny = Math.max(0, Math.min(1, (p.y - 6) / (sc.h - 12)));
+          var np = o.shape.pts.slice(); np.push({ x: nx, y: ny });
+          D.obsSetPts(o, np); render(); renderObsPanel();
+          return;
+        }
+        // 否则尝试抓住一个顶点
+        var best = -1, bd = 1e9;
+        o.shape.pts.forEach(function (pt, i) {
+          var px = 6 + pt.x * (sc.w - 12), py = 6 + pt.y * (sc.h - 12);
+          var d = Math.hypot(px - p.x, py - p.y);
+          if (d < 10 && d < bd) { bd = d; best = i; }
+        });
+        P.shape.drag = best;
+      });
+      sc.canvas.addEventListener('mousemove', function (ev) {
+        if (P.shape.drag < 0) return;
+        var p = scPos(ev);
+        var nx = Math.max(0, Math.min(1, (p.x - 6) / (sc.w - 12)));
+        var ny = Math.max(0, Math.min(1, (p.y - 6) / (sc.h - 12)));
+        var np = o.shape.pts.slice();
+        np[P.shape.drag] = { x: nx, y: ny };
+        D.obsSetPts(o, np); render(); drawShapeEditor();
+      });
+      // 备注 + 删除
+      host.appendChild(U.h('hr', { class: 'sep' }));
+      var note = U.h('input', { type: 'text', value: o.note || '', placeholder: '备注（可选）',
+        on: { change: function () { o.note = this.value; D.emit('obstacles'); } } });
+      host.appendChild(U.h('div', { class: 'row', style: { marginTop: '4px' } }, [U.h('span', { class: 'muted', text: '备注' }), note]));
+      host.appendChild(U.h('button', {
+        class: 'btn danger sm', style: { marginTop: '8px' }, text: '删除该障碍物',
+        on: { click: function () { D.obsRemove(o); P.selObs = null; renderObsPanel(); render(); } }
+      }));
+    }
+
     renderPalette();
+    P.renderObsPanel = renderObsPanel;
+    renderObsPanel();
     render();
 
     /** 尺寸变化后重建本面板（保留滚动位置） */

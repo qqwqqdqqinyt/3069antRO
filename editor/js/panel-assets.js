@@ -32,6 +32,66 @@
     return box;
   }
 
+  /* ---------------- 显示参数微调（缩放 / 偏移） ----------------
+   * 两级合并（按类型统一 → 实例覆盖）由 D.dispGet 负责。
+   * 这里编辑的是“按类型”的默认项（instKey 省略）。
+   * 预览走逐帧读取 D.dispGet，因此这边一改、预览实时跟手。        */
+  function dispControls(group, key, baseScale) {
+    function cur() { return D.dispGet(group, key, null); }
+    function dirty() { return D.dispDirty(group, key, null); }
+
+    var scaleIn = U.h('input', {
+      type: 'number', step: 0.1, min: 0.3, max: 10, placeholder: String(baseScale),
+      title: '渲染缩放（留空 = 沿用游戏本体 ×' + baseScale + '）',
+      on: { change: commit }
+    });
+    var oxIn = U.h('input', {
+      type: 'number', step: 1, placeholder: '0', title: '水平偏移 px',
+      on: { change: commit }
+    });
+    var oyIn = U.h('input', {
+      type: 'number', step: 1, placeholder: '0', title: '垂直偏移 px',
+      on: { change: commit }
+    });
+    var tag = U.h('span', { class: 'tag warn', text: '已覆盖', style: { display: 'none' } });
+    var reset = U.h('button', { class: 'mini', text: '清除覆盖', on: { click: clearIt } });
+
+    function commit() {
+      var scale = scaleIn.value === '' ? null : (Math.max(0.3, +scaleIn.value || baseScale));
+      var ox = oxIn.value === '' ? 0 : (Math.round(+oxIn.value) || 0);
+      var oy = oyIn.value === '' ? 0 : (Math.round(+oyIn.value) || 0);
+      D.dispSet(group, key, null, { scale: scale, ox: ox, oy: oy });
+      refresh();
+    }
+    function clearIt() {
+      D.dispClear(group, key, null);
+      scaleIn.value = ''; oxIn.value = ''; oyIn.value = '';
+      refresh();
+    }
+    function refresh() {
+      var c = cur();
+      scaleIn.value = (c.scale != null) ? c.scale : '';
+      oxIn.value = c.ox || '';
+      oyIn.value = c.oy || '';
+      tag.style.display = dirty() ? '' : 'none';
+    }
+    refresh();
+
+    return U.h('div', { class: 'disp-ctl' }, [
+      U.h('div', { class: 'disp-row' }, [
+        U.h('span', { class: 'disp-lbl', text: '显示调整' }),
+        tag,
+        U.h('span', { class: 'sp' }),
+        reset
+      ]),
+      U.h('div', { class: 'disp-row' }, [
+        U.h('label', { class: 'disp-f' }, [U.h('span', { text: '缩放' }), scaleIn]),
+        U.h('label', { class: 'disp-f' }, [U.h('span', { text: 'X' }), oxIn]),
+        U.h('label', { class: 'disp-f' }, [U.h('span', { text: 'Y' }), oyIn])
+      ])
+    ]);
+  }
+
   /* ---------------- 植物 ---------------- */
   function plantCard(kind, i) {
     var def = G.PLANTS[kind] || {};
@@ -42,17 +102,20 @@
     var anim = null, fireTimer = 1.2 + i * 0.7;
     if (G.PlantArt && G.PlantArt.PlantAnimator) anim = new G.PlantArt.PlantAnimator(kind, i * 2.3);
 
-    var sc = k.scale || 3;
+    var baseSc = k.scale || 3;
     var box = shot(104, function (ctx, size, dt) {
       if (!anim || !G.PX) return;
+      var dp = D.dispGet('plants', kind, null);
+      var sc = (dp.scale != null) ? dp.scale : baseSc;
+      var ox = dp.ox || 0, oy = dp.oy || 0;
       anim.update(dt);
       if (def.proj) {
         fireTimer -= dt;
         if (fireTimer <= 0) { if (P.autoFire) anim.triggerFire(); fireTimer = 2.4; }
       }
       var r = anim.render();
-      G.PX.shadow(ctx, size / 2, size - 10, 15, 4.5, 0.28);
-      G.PX.draw(ctx, r.sprite, size / 2, size - 10 + r.bob, {
+      G.PX.shadow(ctx, size / 2 + ox, size - 10 + oy, 15, 4.5, 0.28);
+      G.PX.draw(ctx, r.sprite, size / 2 + ox, size - 10 + r.bob + oy, {
         frame: r.frame, scale: sc, lean: r.lean, squash: r.squash
       });
     }, (k.w || 0) + '×' + (k.h || 0) + ' px');
@@ -67,7 +130,7 @@
       ['射程', def.range ? (def.range > 1e8 ? '全场' : U.num(def.range, 0)) : '<span class="muted">—</span>'],
       ['溅射', def.aoe ? '半径 ' + def.aoe + ' · 副目标 ' + Math.round((def.aoeRatio || 0) * 100) + '%' : '<span class="muted">无</span>'],
       ['炮口偏移', def.muzzle ? '(' + def.muzzle.dx + ', ' + def.muzzle.dy + ')' : '<span class="muted">—</span>'],
-      ['渲染缩放', '×' + sc]
+      ['渲染缩放', '×' + baseSc + ' <span class="muted">(可被下方调整覆盖)</span>']
     ];
 
     var tags = [];
@@ -82,6 +145,7 @@
         U.h('div', { class: 'name' }, [U.h('span', { text: k.name || def.name || kind }), U.h('span', { class: 'sp' }), U.h('span', { class: 'chips' }, tags)]),
         U.h('div', { class: 'desc', text: def.desc || '' }),
         table(rows),
+        dispControls('plants', kind, baseSc),
         kind === 'sprout' ? U.h('div', { class: 'muted', style: { marginTop: '5px' }, html: '进化目标：豌豆射手 / 卷心菜投手' }) : null
       ])
     ]);
@@ -98,18 +162,23 @@
       var cross = S.crossTime(key, D.cur() ? D.cur().battle.nodeX : 58);
       var gold = R.gold;
 
+      var isBee = (R.kind === 'bee' && G.BeeArt);
       var anim = null;
-      if (G.InsectArt && G.InsectArt.InsectAnimator) anim = new G.InsectArt.InsectAnimator(R.kind, R.speed, i * 3.1);
-      var isc = (G.INSECT_KIND[R.kind] || {}).scale || 3;
-      var sprScale = isc * (R.scale || 1);
+      if (isBee && G.BeeArt.BeeAnimator) anim = new G.BeeArt.BeeAnimator(R.kind, R.speed, i * 3.1);
+      else if (G.InsectArt && G.InsectArt.InsectAnimator) anim = new G.InsectArt.InsectAnimator(R.kind, R.speed, i * 3.1);
+      var baseIsc = (G.INSECT_KIND[R.kind] || {}).scale || 3;
 
       var box = shot(104, function (ctx, size, dt) {
         if (!anim || !G.PX) return;
+        var dp = D.dispGet('enemies', R.kind, null);
+        var isc = (dp.scale != null) ? dp.scale : baseIsc;
+        var sprScale = isc * (R.scale || 1);
+        var ox = dp.ox || 0, oy = dp.oy || 0;
         anim.update(dt, 1);
-        var spr = G.InsectArt.Art[R.kind];
+        var spr = isBee ? (G.BeeArt && G.BeeArt.Art[R.kind]) : G.InsectArt.Art[R.kind];
         if (!spr) return;
-        G.PX.shadow(ctx, size / 2 + 6, size - 14, 14, 4, 0.26);
-        G.PX.draw(ctx, spr, size / 2 + 6, size - 14, { frame: anim.frame(), scale: sprScale * 0.9 });
+        G.PX.shadow(ctx, size / 2 + 6 + ox, size - 14 + oy, 14, 4, 0.26);
+        G.PX.draw(ctx, spr, size / 2 + 6 + ox, size - 14 + oy, { frame: anim.frame(), scale: sprScale * 0.9 });
       }, (G.INSECT_KIND[R.kind] ? R.kind : '') + ' · ' + (R.scale || 1).toFixed(2) + '×');
 
       var rows = [
@@ -136,7 +205,8 @@
             U.h('span', { class: 'muted', text: G.INSECT_KIND[R.kind] ? G.INSECT_KIND[R.kind].name : R.kind })
           ]),
           U.h('div', { class: 'desc', text: '出场受关卡数量缩放 ×' + U.num(sc.count, 2) + '（Boss/精英不缩放）' }),
-          table(rows)
+          table(rows),
+          dispControls('enemies', R.kind, baseIsc)
         ])
       ]);
     });
@@ -331,6 +401,12 @@
   P.unmount = function () {
     P.tickers.forEach(function (f) { ED.ticker.remove(f); });
     P.tickers = [];
+  };
+
+  /** 已挂载状态下由 app.go 调用：清掉旧 ticker 后整体重建，确保切关卡后显示参数同步 */
+  P.render = function (root) {
+    P.unmount();
+    P.mount(root || P.root);
   };
 
   ED.Panels = ED.Panels || {};

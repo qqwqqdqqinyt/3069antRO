@@ -141,6 +141,14 @@
     opts = opts || {};
     this.storage = opts.storage !== false ? safeStorage() : null;
     this.profile = this.load();
+    // 养成成本曲线（实例级）：数值表覆盖层（挂载点⑦）可经 opts.tuning.economy
+    // 覆盖 upgradeCostBase / upgradeCostPow；缺省与模块默认 UPGRADE_COST 一致。
+    this.upgradeCost = Object.assign({}, UPGRADE_COST);
+    if (opts.tuning && opts.tuning.economy) {
+      var eco = opts.tuning.economy;
+      if (typeof eco.upgradeCostBase === 'number') this.upgradeCost.base = eco.upgradeCostBase;
+      if (typeof eco.upgradeCostPow === 'number') this.upgradeCost.pow = eco.upgradeCostPow;
+    }
     this._bind();
   }
 
@@ -221,7 +229,11 @@
   Meta.prototype.upMaxed = function (key) {
     return this.upLevel(key) >= (UPGRADES[key] ? UPGRADES[key].maxLv : 10);
   };
-  Meta.prototype.nextCost = function (key) { return upCost(this.upLevel(key) + 1); };
+  Meta.prototype.nextCost = function (key) { return this.upCost(this.upLevel(key) + 1); };
+  /** 实例级养成成本（受 tuning.economy 覆盖影响） */
+  Meta.prototype.upCost = function (level) {
+    return Math.round(this.upgradeCost.base * Math.pow(this.upgradeCost.pow, level - 1));
+  };
 
   Meta.prototype.buyUpgrade = function (key) {
     if (!UPGRADES[key]) return false;

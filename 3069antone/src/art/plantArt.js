@@ -1,8 +1,9 @@
 /* ============================================================
- *  plantArt.js —— 三种植物的程序化像素形象
+ *  plantArt.js —— 四种植物的程序化像素形象
  *   1. 牙苗 Sprout      可进化为任意植物，一切的开始
  *   2. 豌豆射手 Peashooter  炮口发射，带后坐与炮口焰
  *   3. 卷心菜投手 CabbagePult 尾部投射器，抛物线砸落
+ *   4. 燃芯石榴 BurningPomegranate  吐燃烧石榴籽，待机三跳（轻·轻·重）
  *  全部由代码绘制：呼吸摆动为多帧循环，发射时叠加后坐帧 + 炮口焰。
  * ============================================================ */
 (function (global) {
@@ -237,6 +238,138 @@
   }
 
   /* ============================================================
+   *  4. 燃芯石榴 BurningPomegranate —— 26 x 30
+   *     顶部花萼冠 + 跳动火苗（燃芯）；待机三跳（轻·轻·重）；吐燃烧石榴籽
+   * ============================================================ */
+  var BP = {
+    line: '#3a0d12',
+    crownD: '#4f7d24', crownM: '#79b23a', crownL: '#a6e05a',
+    stemD: '#2c6127', stemM: '#3d8a34', stemL: '#57ab42',
+    leafD: '#255c22', leafM: '#3f9a35', leafL: '#66cc50', leafH: '#93e06d',
+    skinD: '#7c1322', skinM: '#c2283a', skinL: '#e85a4e', skinH: '#ff9a82',
+    crownSkinD: '#9a1a2a', crownSkinM: '#d23a44',
+    eye: '#ffffff', pupil: '#2a0e12', shine: '#ffffff',
+    cheek: '#ff9d86', mouth: '#3a0c10',
+    flameO: '#ff5a1f', flameM: '#ffa22b', flameI: '#ffe06a',
+    emberD: '#7a1208', emberM: '#ff7a1f', emberH: '#ffd75e'
+  };
+
+  function bpFlame(g, cx, cy, sc, t) {
+    var sway = Math.sin(t * Math.PI * 2) * 0.9 * sc;
+    var H = (4.4 + 1.6 * Math.sin(t * Math.PI * 3.3 + 0.6)) * sc;
+    g.save();
+    g.fillStyle = BP.flameO;
+    g.beginPath();
+    g.moveTo(cx - 2.1 * sc, cy);
+    g.quadraticCurveTo(cx - 2.4 * sc, cy - H * 0.55, cx + sway, cy - H);
+    g.quadraticCurveTo(cx + 2.4 * sc, cy - H * 0.55, cx + 2.1 * sc, cy);
+    g.closePath(); g.fill();
+    g.fillStyle = BP.flameM;
+    g.beginPath();
+    g.moveTo(cx - 1.3 * sc, cy);
+    g.quadraticCurveTo(cx - 1.5 * sc, cy - H * 0.5, cx + sway * 0.8, cy - H * 0.74);
+    g.quadraticCurveTo(cx + 1.5 * sc, cy - H * 0.5, cx + 1.3 * sc, cy);
+    g.closePath(); g.fill();
+    g.fillStyle = BP.flameI;
+    g.beginPath();
+    g.moveTo(cx - 0.6 * sc, cy);
+    g.quadraticCurveTo(cx - 0.7 * sc, cy - H * 0.36, cx + sway * 0.6, cy - H * 0.5);
+    g.quadraticCurveTo(cx + 0.7 * sc, cy - H * 0.36, cx + 0.6 * sc, cy);
+    g.closePath(); g.fill();
+    g.restore();
+  }
+
+  /* 待机跳动：轻跳两下（慢·小）→ 重蹦一下（大）。返回 {up, air} */
+  function bpHop(t) {
+    var hops = [[0.08, 1.2, 0.20], [0.36, 1.5, 0.20], [0.66, 3.0, 0.17]];
+    var up = 0;
+    for (var i = 0; i < hops.length; i++) {
+      var pc = hops[i][0], A = hops[i][1], w = hops[i][2];
+      var d = t - pc;
+      if (d > -w && d < w) up += -A * Math.sin(Math.PI * d / w);
+    }
+    up = -up;
+    return { up: up, air: up };
+  }
+
+  function bpBody(g, w, h, cx, cy, t, mouthOpen, flare) {
+    var br = 1 + Math.sin(t * Math.PI * 2) * 0.03;
+    leaf(g, cx + 1.0, cy - 8.6 * br, 6.2, 2.2, -Math.PI * 0.62 - Math.sin(t * Math.PI * 2) * 0.05, C.leafD, C.leafM, C.leafH);
+    // 花萼冠
+    var cw = 6.4, ch = 4.2;
+    P.ell(g, cx, cy - 8.4 * br, cw, ch, BP.crownSkinD);
+    P.ell(g, cx - 0.6, cy - 9.0 * br, cw * 0.82, ch * 0.8, BP.crownSkinM);
+    for (var k = -2; k <= 2; k++) {
+      var ax = cx + k * 2.4, top = cy - 11.2 * br - (Math.abs(k) === 0 ? 1.6 : 0.4);
+      P.poly(g, [[ax - 1.1, cy - 8.0 * br], [ax, top], [ax + 1.1, cy - 8.0 * br]], 1.5, BP.crownM);
+      P.poly(g, [[ax - 0.5, cy - 8.2 * br], [ax, top + 1.2], [ax + 0.5, cy - 8.2 * br]], 0.6, BP.crownL);
+    }
+    bpFlame(g, cx, cy - 13.4 * br, 1.0 + (flare || 0), t);
+    // 果身
+    P.ell(g, cx, cy + 0.4, 9.4, 9.6 * br, BP.skinD);
+    P.ell(g, cx, cy + 0.2, 8.8, 9.0 * br, BP.skinM);
+    P.ell(g, cx - 1.6, cy - 0.4, 7.2, 7.4 * br, BP.skinL);
+    P.ell(g, cx - 2.8, cy - 2.2, 4.2, 3.6, BP.skinH);
+    P.ell(g, cx, cy + 7.4, 5.2, 2.2, BP.crownSkinD);
+    // 余烬微光
+    var pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 3.1);
+    g.save(); g.globalAlpha = 0.30 + pulse * 0.22;
+    P.ell(g, cx + 1.4, cy + 1.6, 3.0 + pulse * 0.5, 2.4 + pulse * 0.4, BP.emberM);
+    P.ell(g, cx + 0.8, cy + 0.8, 1.4, 1.1, BP.emberH);
+    g.restore();
+    // 脸
+    var ex = cx + 0.4, ey = cy - 0.8;
+    eyes(g, ex - 2.6, ey, 1.7, 2.0, 1.1, 0.3, 0.95, 0.1, 0, false);
+    eyes(g, ex + 2.6, ey, 1.7, 2.0, 1.1, 0.3, 0.95, -0.1, 0, false);
+    cheeks(g, ex - 4.4, ex + 4.6, ey + 2.6, 1.5, 0.6);
+    if (mouthOpen > 0.05) {
+      P.ell(g, ex, ey + 3.4, 1.8 + mouthOpen * 1.3, 1.4 + mouthOpen * 1.6, BP.mouth);
+      g.save(); g.globalAlpha = 0.5 + mouthOpen * 0.4;
+      P.ell(g, ex, ey + 3.0, 0.8 + mouthOpen, 0.7 + mouthOpen, BP.emberH);
+      g.restore();
+    } else {
+      g.strokeStyle = BP.mouth; g.lineWidth = 0.8; g.lineCap = 'round';
+      g.beginPath(); g.arc(ex, ey + 3.0, 1.6, 0.12 * Math.PI, 0.88 * Math.PI); g.stroke();
+      g.lineCap = 'butt';
+    }
+  }
+
+  function bpIdle(g, w, h, f, n) {
+    var t = f / n;
+    bpBody(g, w, h, w / 2, h - 1.2 - 13.0, t, 0, 0);
+  }
+
+  function bpFire(g, w, h, f, n) {
+    var fireT = (f + 0.5) / n, t = f / n;
+    var cx = w / 2, cy = h - 1.2 - 13.0;
+    var kick = -Math.sin(Math.min(1, fireT * 1.25) * Math.PI) * 1.8;
+    var mouthOpen = Math.sin(Math.min(1, fireT * 1.4) * Math.PI);
+    var flare = Math.max(0, Math.sin(fireT * Math.PI)) * 0.7;
+    bpBody(g, w, h, cx + kick, cy, t, mouthOpen, flare);
+    if (fireT > 0.18) {
+      var sx = cx + kick + 7.0 + fireT * 9.0;
+      var sy = cy + 2.4 - Math.sin(fireT * Math.PI) * 2.2;
+      var ss = 2.6 * (0.7 + fireT * 0.5);
+      g.save(); g.globalAlpha = 0.8 * (1 - fireT * 0.5);
+      P.circ(g, sx - 2.0, sy, ss * 0.7, BP.flameM);
+      P.circ(g, sx - 3.6, sy + 0.4, ss * 0.45, BP.flameI);
+      g.restore();
+      bpSeed(g, sx, sy, ss);
+    }
+  }
+
+  function bpSeed(g, cx, cy, r) {
+    P.ell(g, cx, cy, r, r * 1.08, BP.skinD);
+    P.ell(g, cx - 0.2, cy, r * 0.92, r * 0.98, BP.skinM);
+    P.ell(g, cx - r * 0.32, cy - r * 0.34, r * 0.5, r * 0.42, BP.skinL);
+    P.ell(g, cx - r * 0.45, cy - r * 0.5, r * 0.22, r * 0.18, BP.skinH);
+    P.ell(g, cx + r * 0.5, cy - r * 0.7, r * 0.28, r * 0.28, BP.crownSkinM);
+    g.save(); g.globalAlpha = 0.5;
+    P.circ(g, cx + 0.2, cy + 0.2, r * 0.5, BP.emberM);
+    g.restore();
+  }
+
+  /* ============================================================
    *  投射物 / 炮口焰 / 特效精灵
    * ============================================================ */
   function drawPeaBall(g, w, h) {
@@ -312,6 +445,17 @@
     Art.cabbagepult._flash = P.makeFlash(Art.cabbagepult, '#d8ffc0');
     Art.cabbagepultFire._flash = Art.cabbagepult._flash;
 
+    // 燃芯石榴：待机 + 发射（复用现有 PlantAnimator，无需改逻辑）
+    Art.burningpomegranate = P.makeSprite(26, 30, IDLE_FRAMES,
+      function (g, w, h, f, n) { bpIdle(g, w, h, f, n); }, { outline: '#3a0d12' });
+    Art.burningpomegranateFire = P.makeSprite(26, 30, FIRE_FRAMES,
+      function (g, w, h, f, n) { bpFire(g, w, h, f, n); }, { outline: '#3a0d12' });
+    Art.burningpomegranate._flash = P.makeFlash(Art.burningpomegranate, '#ffd9b0');
+    Art.burningpomegranateFire._flash = Art.burningpomegranate._flash;
+    // 石榴籽投射物（美术资源，便于后续接入玩法）
+    Art.seed = P.makeSprite(11, 11, 1,
+      function (g, w, h) { bpSeed(g, w / 2, h / 2, w * 0.40); }, { outline: '#3a0d12' });
+
     // 投射物
     Art.pea = P.makeSprite(8, 8, 1, drawPeaBall, { outline: '#1b3f16' });
     Art.cabbage = P.makeSprite(11, 11, 12,
@@ -327,6 +471,7 @@
     Art.icon.sprout = P.makeSprite(22, 26, 1, function (g, w, h) { drawSprout(g, w, h, 0, 1); }, { outline: '#16300f' });
     Art.icon.peashooter = P.makeSprite(26, 30, 1, function (g, w, h) { drawPea(g, w, h, 0, 1, 0); }, { outline: '#16300f' });
     Art.icon.cabbagepult = P.makeSprite(28, 28, 1, function (g, w, h) { drawCabbagePult(g, w, h, 0, 1, 0); }, { outline: '#16300f' });
+    Art.icon.burningpomegranate = P.makeSprite(26, 30, 1, function (g, w, h) { bpIdle(g, w, h, 0, 1); }, { outline: '#3a0d12' });
   }
 
   /* ---------------- 植物动画控制器 ----------------
@@ -337,7 +482,7 @@
     this.kind = kind;
     this.t = (seed || 0) * 1.7;      // 相位错开，避免整排同步
     this.fireT = -1;                  // <0 表示未在发射
-    this.fireDur = kind === 'peashooter' ? 0.26 : 0.34;
+    this.fireDur = kind === 'peashooter' ? 0.26 : (kind === 'burningpomegranate' ? 0.30 : 0.34);
     this.pendingFire = false;
   }
   PlantAnimator.prototype.triggerFire = function () { this.fireT = 0; };
@@ -351,7 +496,7 @@
   PlantAnimator.prototype.isFiring = function () { return this.fireT >= 0; };
   /** 发射动作的“击发瞬间”进度（用于生成子弹/炮口焰） */
   PlantAnimator.prototype.strikeAt = function () {
-    return this.kind === 'peashooter' ? 0.18 : 0.34;   // 归一化的击发时刻
+    return this.kind === 'peashooter' ? 0.18 : (this.kind === 'burningpomegranate' ? 0.22 : 0.34);   // 归一化的击发时刻
   };
   PlantAnimator.prototype.render = function () {
     var idle = Art[this.kind], fire = Art[this.kind + 'Fire'];
@@ -367,8 +512,16 @@
     // 呼吸带来的轻微上下起伏 + 摆动
     var s = Math.sin(this.t * Math.PI * 2 * 0.42);
     var lean = Math.sin(this.t * Math.PI * 2 * 0.42 - 0.5) * 0.034;
-    var bob = s * 0.9;
-    var squash = 1 + s * 0.028;
+    var bob, squash;
+    if (this.kind === 'burningpomegranate') {
+      // 燃芯石榴：轻跳两下 → 重蹦一下（三连跳）；发射时定格，踢腿已烘焙进火帧
+      var hb = firing ? { up: 0, air: 0 } : bpHop(frame / spr.n);
+      bob = firing ? 0 : -hb.up;            // 视图以脚底为锚，向上为正位移
+      squash = 1 - Math.min(0.05, hb.air * 0.01);
+    } else {
+      bob = s * 0.9;
+      squash = 1 + s * 0.028;
+    }
     return { sprite: spr, frame: frame, lean: lean, squash: squash, bob: bob, firing: firing };
   };
 
@@ -378,7 +531,8 @@
     KIND: {
       sprout: { name: '牙苗', desc: '一切的开始，可进化为任意植物', w: 22, h: 26, scale: 3 },
       peashooter: { name: '豌豆射手', desc: '炮口直射，单体稳定输出', w: 26, h: 30, scale: 3 },
-      cabbagepult: { name: '卷心菜投手', desc: '尾部抛射，落点小范围溅射', w: 28, h: 28, scale: 3 }
+      cabbagepult: { name: '卷心菜投手', desc: '尾部抛射，落点小范围溅射', w: 28, h: 28, scale: 3 },
+      burningpomegranate: { name: '燃芯石榴', desc: '吐出红色石榴籽，附带微弱燃烧伤害', w: 26, h: 30, scale: 3 }
     }
   };
 })(window);

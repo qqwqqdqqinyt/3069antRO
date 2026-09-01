@@ -133,7 +133,8 @@ window.ED = window.ED || {};
       swift: { kind: 'fireant', name: '迅捷', hp: 85, speed: 0.75, dmg: 3, armor: 0.0, scale: 0.92, gold: 6 },
       armor: { kind: 'beetle', name: '重甲', hp: 190, speed: 0.22, dmg: 12, armor: 0.30, scale: 1.00, gold: 12 },
       elite: { kind: 'beetle', name: '精英', hp: 450, speed: 0.28, dmg: 25, armor: 0.15, scale: 1.26, gold: 30 },
-      boss: { kind: 'beetle', name: 'Boss', hp: 1400, speed: 0.20, dmg: 40, armor: 0.20, scale: 1.52, gold: 90 }
+      boss: { kind: 'beetle', name: 'Boss', hp: 1400, speed: 0.20, dmg: 40, armor: 0.20, scale: 1.52, gold: 90 },
+      bee: { kind: 'bee', name: '蜜蜂', hp: 70, speed: 0.62, dmg: 6, armor: 0, scale: 1.0, gold: 9, flying: true }
     },
     PLANTS: {
       sprout: { name: '牙苗', dmg: 0, interval: 0, range: 0, proj: null, desc: '一切的开始，可进化为任意植物' },
@@ -160,7 +161,33 @@ window.ED = window.ED || {};
       { name: 'T3', pool: [4, 8], w: [80, 20], E: 4.8, levels: '5–6', goal: '冲 512' },
       { name: 'T4', pool: [4, 8, 16], w: [70, 20, 10], E: 6.0, levels: '7–9', goal: '冲 512 稳定化' },
       { name: 'T5', pool: [8, 16], w: [80, 20], E: 9.6, levels: '10+', goal: '冲 1024' }
-    ]
+    ],
+    CARDS: {
+      sharp: { id: 'sharp', name: '锋锐', rarity: '普通', pp: 6.0, tag: 'plant', max: 9, desc: '植物伤害 +15%' },
+      rapid: { id: 'rapid', name: '连射', rarity: '普通', pp: 6.0, tag: 'plant', max: 9, desc: '植物攻速 +15%' },
+      crit: { id: 'crit', name: '暴击', rarity: '普通', pp: 6.0, tag: 'plant', max: 9, desc: '暴击率提升' },
+      pierce: { id: 'pierce', name: '破甲', rarity: '普通', pp: 4.5, tag: 'situational', max: 9, desc: '无视部分护甲' },
+      frostbite: { id: 'frostbite', name: '霜噬', rarity: '普通', pp: 4.4, tag: 'situational', max: 9, desc: '冰系增伤' },
+      gale: { id: 'gale', name: '疾风', rarity: '稀有', pp: 7.6, tag: 'step', max: 6, desc: '步数 +1' },
+      symbiosis: { id: 'symbiosis', name: '共生', rarity: '稀有', pp: 7.4, tag: 'plant', max: 6, desc: '相邻植物增益' },
+      overcharge: { id: 'overcharge', name: '超充', rarity: '稀有', pp: 9.1, tag: 'charge', max: 6, desc: '充能获取 +' },
+      cascade: { id: 'cascade', name: '连锁', rarity: '稀有', pp: 7.7, tag: 'charge', max: 6, desc: '附魔连锁' },
+      bigshot: { id: 'bigshot', name: '巨弹', rarity: '稀有', pp: 7.3, tag: 'plant', max: 6, desc: '弹道增伤' },
+      twinbarrel: { id: 'twinbarrel', name: '双管', rarity: '稀有', pp: 8.6, tag: 'plant', max: 6, desc: '双发' },
+      surge: { id: 'surge', name: '涌流', rarity: '史诗', pp: 18.4, tag: 'step', max: 3, desc: '步数大幅 +' },
+      overload_core: { id: 'overload_core', name: '超载核心', rarity: '史诗', pp: 12.6, tag: 'enchant', max: 3, desc: '超载倍率' },
+      twin_cast: { id: 'twin_cast', name: '双生', rarity: '史诗', pp: 15.1, tag: 'enchant', max: 3, desc: '双元素附魔' },
+      genesis: { id: 'genesis', name: '创世', rarity: '史诗', pp: 11.6, tag: 'econ', max: 3, desc: '资源产出 +' },
+      harvest: { id: 'harvest', name: '丰收', rarity: '传说', pp: 20.2, tag: 'econ', max: 2, desc: '资源产出 ++' },
+      singularity: { id: 'singularity', name: '奇点', rarity: '传说', pp: 27.7, tag: 'enchant', max: 1, desc: '终极附魔' },
+      greed: { id: 'greed', name: '贪婪', rarity: '经济', pp: 0, tag: 'econ', max: 1, desc: '金币 +' },
+      shard_seeker: { id: 'shard_seeker', name: '碎屑搜寻', rarity: '经济', pp: 0, tag: 'econ', max: 1, desc: '碎片 +' },
+      stardust: { id: 'stardust', name: '星尘亲和', rarity: '经济', pp: 0, tag: 'econ', max: 1, desc: '星尘 +' },
+      scavenger: { id: 'scavenger', name: '拾荒', rarity: '经济', pp: 0, tag: 'econ', max: 1, desc: '回收 +' },
+      bastion: { id: 'bastion', name: '壁垒', rarity: '生存', pp: 0, tag: 'defense', max: 1, desc: '星枢护盾' },
+      thorn: { id: 'thorn', name: '尖刺', rarity: '生存', pp: 0, tag: 'defense', max: 1, desc: '反伤' },
+      mender: { id: 'mender', name: '修补', rarity: '生存', pp: 0, tag: 'defense', max: 1, desc: '自愈' }
+    }
   };
 
   function build() {
@@ -174,6 +201,7 @@ window.ED = window.ED || {};
       PX: w.PX || null,
       PlantArt: w.PlantArt || null,
       InsectArt: w.InsectArt || null,
+      BeeArt: w.BeeArt || null,
       FX: w.FX || null,
       Battlefield: w.Battlefield || null,
       Board2048: w.Board2048 || null,
@@ -187,6 +215,7 @@ window.ED = window.ED || {};
       ELEMENT_CN: (w.Battlefield && w.Battlefield.ELEMENT_CN) || FALLBACK.ELEMENT_CN,
       K: (w.Director && w.Director.K) || FALLBACK.K,
       TIERS: (w.Board2048 && w.Board2048.tiers) || FALLBACK.TIERS,
+      CARDS: (w.Cards && w.Cards.BY_ID) || FALLBACK.CARDS,
       PLANT_COST: { sprout: 20, peashooter: 60, cabbagepult: 140 },
       ELEM_RULE: {
         fire: '全场均分，总量封顶 EP×2.5；附加灼烧',
@@ -200,9 +229,12 @@ window.ED = window.ED || {};
     G.PLANT_KIND = (w.PlantArt && w.PlantArt.KIND) || {
       sprout: { name: '牙苗', scale: 3 }, peashooter: { name: '豌豆射手', scale: 3 }, cabbagepult: { name: '卷心菜投手', scale: 3 }
     };
-    G.INSECT_KIND = (w.InsectArt && w.InsectArt.KIND) || {
+    G.INSECT_KIND = Object.assign({}, (w.InsectArt && w.InsectArt.KIND) || {
       ant: { name: '普通蚂蚁', scale: 3 }, fireant: { name: '红火蚁', scale: 3 }, beetle: { name: '天牛', scale: 3 }
-    };
+    });
+    // 蜜蜂住在 BeeArt（飞行单位），合并进昆虫表，图鉴与波次校验才能识别它
+    if (w.BeeArt && w.BeeArt.KIND) Object.assign(G.INSECT_KIND, w.BeeArt.KIND);
+    else G.INSECT_KIND.bee = { name: '蜜蜂', scale: 3, flying: true };
     G.DEFAULT_ROULETTE = ['thunder', 'fire', 'ice', 'wood', 'water', 'light'];
     return G;
   }

@@ -13,7 +13,9 @@
     { key: 'scene', cls: 'panel cols' },
     { key: 'level', cls: 'panel cols' },
     { key: 'map', cls: 'panel cols' },
-    { key: 'export', cls: 'panel pad' }
+    { key: 'export', cls: 'panel pad' },
+    { key: 'tables', cls: 'panel cols' },
+    { key: 'tune', cls: 'panel cols' }
   ];
 
   app.go = function (key) {
@@ -86,6 +88,7 @@
       try {
         if (G.PlantArt && G.PlantArt.build) G.PlantArt.build();
         if (G.InsectArt && G.InsectArt.build) G.InsectArt.build();
+        if (G.BeeArt && G.BeeArt.build) G.BeeArt.build();
       } catch (e) {
         console.error('[art]', e);
         ED.toast('精灵生成失败：' + e.message, 'bad');

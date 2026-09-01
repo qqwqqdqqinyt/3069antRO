@@ -41,13 +41,22 @@ function makeCanvas() {
   };
 }
 
+/* 可复现的 Math.random —— cards.js 用它给卡牌 RNG 播种，
+   不固定下来同一份代码每次跑出的卡组都不一样，600 秒长跑就成了抛硬币。 */
+let __rseed = 0x2f6e2b1 >>> 0;
+const MathStub = Object.create(Math);
+MathStub.random = function () {
+  __rseed = (Math.imul(__rseed, 1664525) + 1013904223) >>> 0;
+  return __rseed / 4294967296;
+};
+
 const sandbox = {
   console,
   performance: { now: () => Number(process.hrtime.bigint() / 1000000n) },
   requestAnimationFrame: (cb) => { sandbox.__raf = cb; return 1; },
   cancelAnimationFrame: () => {},
   setTimeout, clearTimeout, setInterval, clearInterval,
-  Math, Date, JSON, Object, Array, String, Number, Boolean, Error,
+  Math: MathStub, Date, JSON, Object, Array, String, Number, Boolean, Error,
   Uint8Array, Uint8ClampedArray, Float32Array, Int32Array,
   // 内存版 localStorage，模拟元游戏存档
   localStorage: (() => { const m = {}; return {

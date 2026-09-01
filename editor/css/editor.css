@@ -145,12 +145,53 @@ label.f > span { min-width: 62px; color: var(--dim); }
 .tag.bad { background: rgba(255,143,143,.14); color: #ffcfcf; border-color: rgba(255,143,143,.32); }
 .tag.pur { background: rgba(185,166,255,.15); color: #ddd2ff; border-color: rgba(185,166,255,.34); }
 
+/* ---------------- 显示参数微调 ---------------- */
+.disp-ctl {
+  margin-top: 8px; padding: 7px 8px; border-radius: 8px;
+  background: rgba(111,214,255,.06); border: 1px solid rgba(111,214,255,.18);
+}
+.disp-ctl .disp-row { display: flex; align-items: center; gap: 6px; }
+.disp-ctl .disp-row + .disp-row { margin-top: 6px; }
+.disp-ctl .disp-lbl { font-size: 11px; font-weight: 700; color: #cfe6ff; }
+.disp-ctl .disp-f { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--dim); }
+.disp-ctl .disp-f input { width: 48px; padding: 3px 5px; font-size: 11px; }
+.disp-ctl .mini {
+  padding: 2px 8px; border-radius: 6px; cursor: pointer; font-size: 10.5px; font-family: inherit;
+  background: rgba(255,255,255,.06); border: 1px solid var(--line2); color: var(--txt2);
+  transition: .13s;
+}
+.disp-ctl .mini:hover { background: rgba(255,143,143,.14); border-color: rgba(255,143,143,.4); color: #ffd0d0; }
+
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11.5px; }
 .kv dt { color: var(--dim); }
 .kv dd { margin: 0; color: var(--txt); font-variant-numeric: tabular-nums; }
 
 .muted { color: var(--dim); font-size: 11px; line-height: 1.6; }
 hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+
+/* ---------------- 数值表 / 卡牌经济 编辑器 ---------------- */
+.panel-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.panel-head > div:first-child { flex: 1; }
+.panel-head h2 { margin: 0 0 3px; font-size: 15px; color: #eaf3ff; }
+.panel-actions { display: flex; gap: 8px; align-items: flex-start; flex-shrink: 0; }
+
+.card h3 { margin: 0 0 4px; font-size: 13px; color: #dCEBFF; letter-spacing: .02em; }
+.card h4 { margin: 12px 0 4px; font-size: 12px; color: var(--txt2); }
+.card .muted { margin: 0 0 6px; }
+
+.tune-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 6px; }
+.tune-table th, .tune-table td { text-align: left; padding: 5px 7px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.tune-table th { color: var(--dim); font-weight: 700; font-size: 10.5px; letter-spacing: .03em; }
+.tune-table td b { color: #eaf3ff; }
+.tune-table tr:hover td { background: rgba(111,214,255,.04); }
+.tune-table input[type=number] { width: 74px; }
+.tune-table input.tstr { width: 128px; }
+.tune-table input.tstr.wide { width: 220px; }
+
+.cov { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; }
+.cov.on { background: rgba(255,180,84,.16); color: #ffd9a8; border: 1px solid rgba(255,180,84,.35); }
+.cov.off { background: rgba(255,255,255,.05); color: var(--dim); border: 1px solid var(--line); }
+.small { font-size: 10.5px; }
 
 /* ---------------- 图鉴 ---------------- */
 .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 12px; }
@@ -261,6 +302,19 @@ canvas.game {
 .pal .sw { width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(0,0,0,.4); flex: 0 0 18px; }
 .pal .nm { font-weight: 700; }
 .pal .ds { color: var(--dim); font-size: 10px; }
+.pal-h {
+  margin: 10px 0 6px; padding: 3px 8px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  color: var(--dim); text-transform: none; border-left: 2px solid var(--acc); background: rgba(111,214,255,.07);
+  border-radius: 0 6px 6px 0;
+}
+.col-h {
+  margin: 8px 0 3px; font-size: 11px; font-weight: 700; color: #cfe0f5;
+}
+.lnk {
+  cursor: pointer; color: var(--acc); font-size: 13px; line-height: 1; padding: 0 4px; user-select: none;
+}
+.lnk:hover { color: #fff; }
+
 
 /* ---------------- 导出 ---------------- */
 .code {

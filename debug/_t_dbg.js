@@ -1,0 +1,13 @@
+global.window = { ED: {}, devicePixelRatio: 1 };
+global.document = { getElementById: function(){ return null; } };
+require('../editor/js/core.js');
+require('../editor/js/data.js');
+var D = global.window.ED.Data;
+D.load();
+D.dispSet('plants', 'peashooter', null, { scale: 3.4, oy: -6 });
+console.log('写入类型后 byType:', JSON.stringify(D.cur().display.byType.plants));
+D.dispSet('plants', 'peashooter', 'L0C0', { ox: 12 });
+console.log('写入实例后 byInst:', JSON.stringify(D.cur().display.byInst));
+var d = D.cur().display;
+console.log('byInst.plants 存在?', !!d.byInst.plants, '| L0C0 =', JSON.stringify(d.byInst.plants && d.byInst.plants['L0C0']));
+console.log('dispGet =', JSON.stringify(D.dispGet('plants','peashooter','L0C0')));

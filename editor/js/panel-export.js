@@ -27,28 +27,26 @@
   }
 
   var ACCESS =
-    '<!-- ① 把导出的 levels.js 放到：3069antone/src/data/levels.js -->\n' +
+    '把「下载 levels.js」按钮生成的文件放到：3069antone/src/data/levels.js\n' +
+    '（内容形如：window.LEVEL_DATA = {...}，编辑器已生成好）\n' +
     '\n' +
-    '<!-- ② 在 3069antone/index.html 中，紧接着 <script src="src/main.js"></script> 之前加入两行 -->\n' +
-    '<script src="src/data/levels.js"></script>\n' +
-    '<script>\n' +
-    '  (function () {\n' +
-    '    var d = window.LEVEL_DATA;\n' +
-    '    if (!d || !d.levels || !d.levels.length) return;\n' +
-    '    var L = d.levels[0];                     // 目前游戏只有一套 WAVES，取第一关\n' +
+    '然后在 3069antone/index.html 中，紧挨下面这行之前加一行：\n' +
+    '    <script src="src/main.js"></script>\n' +
+    '改为：\n' +
+    '    <script src="src/data/levels.js"></script>\n' +
+    '    <script src="src/main.js"></script>\n' +
     '\n' +
-    '    // 必接：波次表（结构与 Battlefield.WAVES 完全一致）\n' +
-    '    Battlefield.WAVES = L.waves.map(function (w) {\n' +
-    '      return { t: w.t, intent: w.intent, comp: w.comp.map(function (c) { return [c[0], c[1]]; }) };\n' +
-    '    });\n' +
+    '完成。Battlefield 已内置三个挂载点，main.js 的 buildWorld() 会自动读取\n' +
+    'window.LEVEL_DATA.levels[0] 并注入，无需你改动任何游戏逻辑。\n' +
     '\n' +
-    '    // 选接：战场尺寸 / 星枢 / 元素轮盘 / 地形\n' +
-    '    // main.js 的 buildWorld() 里把 new Battlefield({...}) 的 lanes/cols/nodeX\n' +
-    '    // 换成 L.battle.lanes / L.battle.cols / L.battle.nodeX，\n' +
-    '    // 再把 director.roulette = L.roulette.slice()。\n' +
-    '    // 地形 L.map.tiles[lane][col] 需要游戏侧实现寻路与增益后才生效（effects 见 L.map.effects）。\n' +
-    '  })();\n' +
-    '</script>';
+    '挂载点（游戏侧已实现）：\n' +
+    '  ① 波次/轮盘/常量：buildWorld 取 LEVEL_DATA.levels[0]，把 waves / roulette 喂给\n' +
+    '     new Battlefield({ waves }) / Director.roulette\n' +
+    '  ② 障碍物碰撞：Battlefield.loadObstacles(opts.obstacles)，自动跳过 applied=false\n' +
+    '  ③ 显示调整：Battlefield.dispGet(group,key,instKey)，BattleView 绘制时消费缩放/偏移\n' +
+    '\n' +
+    '  Battlefield 新增构造参数：{ waves:[...], obstacles:[...], display:{...} }\n' +
+    '  不传则全部回落游戏内默认值；删掉 levels.js 即回到原版行为。';
 
   function refresh() {
     if (P.area) P.area.value = jsonText();
@@ -181,17 +179,23 @@
         U.h('div', { class: 'card' }, [
           U.h('div', { class: 'h' }, [U.h('span', { text: '数据结构说明' })]),
           U.h('div', { class: 'muted', html:
-            '<b>levels[]</b><br>' +
-            '· <code>board</code>：2048 棋盘尺寸 n、生成档 tier、步数上限与回复<br>' +
-            '· <code>battle</code>：lanes / cols / nodeX / nodeHp / gold —— 直接对应 Battlefield 构造参数<br>' +
-            '· <code>roulette</code>：6 格元素轮盘，对应 Director.roulette<br>' +
-            '· <code>map.tiles[lane][col]</code>：地块类型；<code>map.effects</code>：泥地/水洼系数（游戏侧可选实现）<br>' +
-            '· <code>plants[]</code>：开局布防（lane/col/kind），只有落在种植槽上的会被采用<br>' +
-            '· <code>waves[]</code>：<code>{t, intent, comp:[[role,count]]}</code> —— 与 Battlefield.WAVES 同构，游戏可直接替换<br><br>' +
+            '<b>levels[]</b>（统一格式 v' + D.FORMAT.version + '）<br>' +
+            '· <code>board</code>：2048 棋盘 n / 生成档 tier / 步数上限与回复<br>' +
+            '· <code>battle</code>：lanes / cols / nodeX / nodeHp / gold（布局由游戏响应式 Layout 决定，关卡假设与其一致）<br>' +
+            '· <code>roulette</code>：6 格元素轮盘 → Director.roulette（挂载点①）<br>' +
+            '· <code>map.tiles[lane][col]</code>：地块类型；<code>map.effects</code>：泥地/水洼系数<br>' +
+            '· <code>plants[]</code>：开局布防（lane/col/kind），仅落在种植槽上的生效<br>' +
+            '· <code>obstacles[]</code>：<code>{id,lane,col,kind,applied,collide?,shape?}</code> → <code>Battlefield.loadObstacles</code>（挂载点②）；<code>applied=false</code> 不进游戏<br>' +
+            '· <code>display</code>：<code>{byType, byInst}</code> 缩放/偏移 → <code>Battlefield.dispGet</code>，BattleView 消费（挂载点③）；<code>scale=null</code> 沿用本体；byInst 植物键为 <code>"L{lane}C{col}"</code><br>' +
+            '· <code>waves[]</code>：<code>{t, intent, comp:[[role,count]]}</code> → <code>new Battlefield({waves})</code>（挂载点①）<br><br>' +
+            '<b>挂载点（游戏侧已内置，编辑器只产数据）</b><br>' +
+            '· ① 启动期常量：buildWorld 读 <code>window.LEVEL_DATA.levels[0]</code>，注入 waves / roulette<br>' +
+            '· ② 障碍物碰撞：<code>loadObstacles(opts.obstacles)</code>，逐实例 collide 回落类型默认，自动跳过未应用项<br>' +
+            '· ③ 显示调整：<code>dispGet(group,key,instKey)</code> 两级合并（byType → byInst），BattleView 绘制时偏移/缩放精灵<br><br>' +
             '<b>编辑器与游戏的关系</b><br>' +
-            '· 编辑器位于 <code>editor/</code>，只读引用 <code>3069antone/src/*.js</code>，<b>不修改任何游戏文件</b><br>' +
-            '· 数据单向流动：编辑器 → 导出 levels.js → 游戏加载。删掉 editor/ 不影响游戏运行<br>' +
-            '· 游戏源码改动（数值、精灵、公式）会立刻反映到编辑器的图鉴与预览' })
+            '· 编辑器只读引用游戏源码做图鉴/预览，<b>不重写游戏逻辑</b>；但导出的是数据文件 <code>levels.js</code><br>' +
+            '· 数据单向流动：编辑器 → 导出 levels.js（挂 window.LEVEL_DATA）→ 游戏 buildWorld 注入<br>' +
+            '· 不引入 levels.js 则全部走游戏内默认，行为与旧版一致；精灵/数值改动经 ED.G 同源即时反映' })
         ])
       ])
     ]));

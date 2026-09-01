@@ -264,6 +264,10 @@
     // 用装饰器而不是让 Meta 直接改 mod，是为了让「谁改了什么」永远可追溯。
     this._decorators = [];
 
+    // 数值表覆盖层（挂载点⑦）：编辑器导出的 tuning.cards 可改卡牌 pp/上限/稀有度等。
+    // 仅改数值字段，不碰 apply() 逻辑与元素变体标记；缺省（无编辑器数据）不受影响。
+    if (opts.tuning && opts.tuning.cards) this.applyTuning(opts.tuning.cards);
+
     this._bind();
   }
 
@@ -448,6 +452,29 @@
     this.wave = 0;
     this.pending = null;
     this.recompute();
+  };
+
+  /**
+   * 数值表覆盖层（挂载点⑦）：把编辑器 tuning.cards 合并进卡池。
+   * 只改数值/展示字段（pp / max / rarity / tag / name / desc / flavor），
+   * 不碰 apply() 与 element 变体标记，避免破坏抽卡与加成逻辑。
+   * POOL 与 BY_ID 指向同一批对象，改一处即两处生效。
+   */
+  CardSystem.prototype.applyTuning = function (cards) {
+    if (!cards || typeof cards !== 'object') return;
+    for (var id in cards) {
+      var c = BY_ID[id];
+      if (!c) continue;
+      var ov = cards[id];
+      if (typeof ov !== 'object') continue;
+      if (typeof ov.pp === 'number') c.pp = ov.pp;
+      if (typeof ov.max === 'number') c.max = ov.max;
+      if (typeof ov.rarity === 'string') c.rarity = ov.rarity;
+      if (typeof ov.tag === 'string') c.tag = ov.tag;
+      if (typeof ov.name === 'string') c.name = ov.name;
+      if (typeof ov.desc === 'string') c.desc = ov.desc;
+      if (typeof ov.flavor === 'string') c.flavor = ov.flavor;
+    }
   };
 
   global.Cards = CardSystem;

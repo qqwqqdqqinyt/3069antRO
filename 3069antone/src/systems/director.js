@@ -53,6 +53,18 @@
       goldMult: 1, shardMult: 1, starMult: 1, matAdd: 0, stepGiftAdd: 0
     };
 
+    // 核心常量副本（实例级）：数值表覆盖层（挂载点⑦）可经 opts.tuning.economy 覆盖
+    // CHARGE_MAX / CHARGE_K / EP_BASE / ELEM_CAP / STEP_GIFT / STAR_POW 等。
+    // 缺省（无编辑器数据）则与模块默认 K 逐位一致 —— 游戏本体行为不变。
+    this.K = Object.assign({}, K);
+    if (opts.tuning && opts.tuning.economy) {
+      var eco = opts.tuning.economy;
+      ['CHARGE_MAX', 'CHARGE_K', 'EP_BASE', 'ELEM_CAP', 'STEP_GIFT',
+        'STAR_POW', 'K_STAR', 'K_GOLD', 'K_SHARD', 'RES2', 'RES3'].forEach(function (k) {
+        if (eco[k] !== undefined && eco[k] !== null) this.K[k] = eco[k];
+      }, this);
+    }
+
     this._bind();
   }
 
@@ -62,7 +74,7 @@
     var self = this;
     global.Bus.on(EV.BOARD_MERGE, function (m) { self.onMerge(m); }, this);
     global.Bus.on(EV.WAVE_START, function (p) {
-      if (self.board) self.board.grantSteps(K.STEP_GIFT + self.mod.stepGiftAdd);
+      if (self.board) self.board.grantSteps(self.K.STEP_GIFT + self.mod.stepGiftAdd);
       global.Bus.emit(EV.TOAST, { text: '第 ' + p.wave + ' 波 · ' + (p.intent || ''), kind: 'wave' });
     }, this);
     global.Bus.on(EV.WAVE_CLEAR, function (p) {
@@ -102,9 +114,9 @@
 
     // 货币
     var gain = {
-      star: cv * K.K_STAR * this.mod.starMult,
-      gold: cv * K.K_GOLD * this.mod.goldMult,
-      shard: cv * K.K_SHARD * this.mod.shardMult,
+      star: cv * this.K.K_STAR * this.mod.starMult,
+      gold: cv * this.K.K_GOLD * this.mod.goldMult,
+      shard: cv * this.K.K_SHARD * this.mod.shardMult,
       core: this._coreOf(m.value)
     };
     this.currency.star += gain.star;
@@ -120,25 +132,25 @@
     //   （v0.2 表里把 LOG_CORR 又乘了一遍，导致充能速率被系统性低估 22%。）
     // 连锁：本次移动中第 2 次及以后的合成，充能额外加成
     var chainBoost = (m.seq > 0) ? this.mod.chainCharge : 1;
-    var cg = K.CHARGE_K * Math.log(m.value / E) / Math.LN2 * this.mod.chargeGain * chainBoost;
+    var cg = this.K.CHARGE_K * Math.log(m.value / E) / Math.LN2 * this.mod.chargeGain * chainBoost;
     this.charge += cg;
-    global.Bus.emit(EV.CHARGE_GAIN, { gain: cg, charge: this.charge, max: K.CHARGE_MAX });
+    global.Bus.emit(EV.CHARGE_GAIN, { gain: cg, charge: this.charge, max: this.K.CHARGE_MAX });
 
     // 超载：v >= 门槛（「奇点」把它从 256 降到 128）
     if (m.value >= this.mod.overloadGate) {
       var star = Math.round(Math.log(m.value) / Math.LN2) - 7 + this.mod.starBonus;
       star = M.clamp(star, 1, 6);
-      var power = K.STAR_POW[star];
-      var pool = K.EP_BASE * power * K.ELEM_CAP * this.mod.poolMult;
+      var power = this.K.STAR_POW[star];
+      var pool = this.K.EP_BASE * power * this.K.ELEM_CAP * this.mod.poolMult;
       this.casts.overload++;
       this._cast(pool, 'overload', star, m);
       return;
     }
 
     // 小附魔：充能满
-    while (this.charge >= K.CHARGE_MAX) {
-      this.charge -= K.CHARGE_MAX;
-      var p2 = K.EP_BASE * 1.0 * K.ELEM_CAP * this.mod.poolMult;
+    while (this.charge >= this.K.CHARGE_MAX) {
+      this.charge -= this.K.CHARGE_MAX;
+      var p2 = this.K.EP_BASE * 1.0 * this.K.ELEM_CAP * this.mod.poolMult;
       this.casts.small++;
       this._cast(p2, 'small', 0, m);
     }
@@ -159,8 +171,8 @@
     var mult = 1;
     if (el === this.lastElement) {
       this.streak++;
-      if (this.streak >= 2) mult = K.RES3;
-      else mult = K.RES2;
+      if (this.streak >= 2) mult = this.K.RES3;
+      else mult = this.K.RES2;
     } else {
       this.streak = 0;
     }

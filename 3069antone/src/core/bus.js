@@ -84,6 +84,9 @@
     NODE_DAMAGE: 'battle:nodeDamage',    // {amount, hp, max}
     NODE_DEAD: 'battle:nodeDead',
     PLANT_FIRE: 'battle:plantFire',      // {plant, projectile}
+    PLANT_HIT: 'battle:plantHit',        // {plant, amount, source}
+    PLANT_DEAD: 'battle:plantDead',      // {plant, source}
+    SPIDER_GRAPPLE: 'battle:spiderGrapple', // {enemy, anchor}  触手抛出并缠住锚点
     LEVEL_CLEAR: 'battle:levelClear',    // {level}
 
     // ---- 外部 → Battlefield ----

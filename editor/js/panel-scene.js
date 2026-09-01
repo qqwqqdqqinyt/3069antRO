@@ -81,7 +81,8 @@
 
     P.bf = new G.Battlefield({
       x: REGION.x, y: REGION.y, w: REGION.w, h: REGION.h,
-      lanes: L.battle.lanes, cols: L.battle.cols, nodeX: L.battle.nodeX, seed: seed
+      lanes: L.battle.lanes, cols: L.battle.cols, nodeX: L.battle.nodeX, seed: seed,
+      obstacles: L.obstacles, display: L.display, map: L.map
     });
     P.bf.level = Math.max(1, D.active + 1);
     P.bf.nodeMax = L.battle.nodeHp;
@@ -163,25 +164,10 @@
     bf._spawnEnemy(role);
   }
 
-  /* ---------------- 地形效果（预览实现） ---------------- */
-  function applyTerrain() {
-    var bf = P.bf;
-    for (var i = 0; i < bf.enemies.length; i++) {
-      var e = bf.enemies[i];
-      if (e.dead) continue;
-      if (e.__base === undefined) e.__base = e.baseSpeed;
-      var c0 = colOf(e.x);
-      var t = D.TILES[tileAt(e.lane, c0)];
-      var f = 1 - (t && t.slow ? t.slow : 0);
-      e.baseSpeed = e.__base * f;
-      if (t && !t.walk) {
-        // 阻挡：贴着该格右侧停住（预览行为；游戏侧尚未实现寻路）
-        e.x = Math.max(e.x, cellRight(c0) + 1);
-      }
-    }
-  }
-
   /* ---------------- 更新 ---------------- */
+  // 注：地形（减速 / 岩石·空洞阻挡 / 水洼冰系加成）已实现在游戏引擎 Battlefield 内
+  // （挂载点⑤，battlefield.js:_terrainApply / _terrainBlock / damageEnemy）。
+  // 编辑器预览直接把 map 传给同一个 Battlefield，行为天然与游戏 100% 同源，无需在此重复实现。
   function update(dt) {
     if (!P.running || !P.bf) return;
     var bf = P.bf;
@@ -207,8 +193,6 @@
       P.waveGap -= dt;
       if (P.waveGap <= 0) nextWave();
     }
-
-    applyTerrain();
 
     bf.update(dt);
     if (P.dir) P.dir.update(dt);
@@ -311,6 +295,7 @@
     bv._bg(ctx, R);
     if (P.showTerrain) drawTerrain(ctx);
     if (P.showGrid) drawGrid(ctx);
+    if (P.bv) P.bv._obstacles(ctx);
     bv._node(ctx);
 
     var ents = [];

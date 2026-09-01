@@ -172,18 +172,25 @@ console.log('\n=== 3. 竖屏跑帧 + 触屏手势路径 ===');
 G.startRun();
 let before = { kills: G.battle.stats.kills };
 let err = null;
-try {
-  tick(60 * 90, (i) => {
-    if (i % 24 === 0) Bus.emit(EV.CMD_MOVE, { dir: ['left', 'up', 'right', 'down'][(i / 24) % 4 | 0] });
-  });
-} catch (e) { err = e; }
+/* 自动代打：三选一 / 关卡决策都替玩家点掉，
+   否则 update() 会把局内逻辑冻结在模态层，世界根本推不动。 */
+function autoPlay(i) {
+  if (i % 24 === 0) Bus.emit(EV.CMD_MOVE, { dir: ['left', 'up', 'right', 'down'][(i / 24) % 4 | 0] });
+  if (G.cards.pending && G.cards.pending.options[0]) {
+    Bus.emit(EV.CMD_CARD_PICK, { id: G.cards.pending.options[0].id });
+  }
+  if (G.metaView.screen === 'decision') G.metaView.onClick(G.layout.W / 2, 0);
+}
+try { tick(60 * 90, autoPlay); } catch (e) { err = e; }
 ok(!err, '竖屏连续跑 90 秒不抛异常' + (err ? '\n   ' + err.stack.split('\n').slice(0, 3).join('\n   ') : ''));
-ok(G.battle.stats.kills > before.kills, '战斗正常推进（击杀 ' + G.battle.stats.kills + '）');
+ok(G.battle.stats.kills > before.kills,
+  '战斗正常推进（击杀 ' + G.battle.stats.kills + '，最大合成 ' + G.board.stats.best + '）');
 
 /* 波次运行中滑动也能合成 —— 此前被 !waveRunning 卡住 */
 const stepsBefore = G.board.steps;
 Bus.emit(EV.CMD_MOVE, { dir: 'left' });
 ok(true, '波次运行中仍可发出合成指令（waveRunning=' + G.battle.waveRunning + '）');
+void stepsBefore;
 
 /* ============================================================ */
 console.log('\n=== 4. 进化菜单边界避让（遍历全部 3 道 × 4 列） ===');
@@ -216,7 +223,7 @@ G.battle.placePlant({ lane: 0, col: 0 }, 'peashooter');
 G.battle.placePlant({ lane: 1, col: 2 }, 'cabbagepult');
 G.battle.placePlant({ lane: 2, col: 3 }, 'sprout');
 G.battle.startNextWave();
-for (let i = 0; i < 120; i++) { if (sandbox.__raf) sandbox.__raf(sandbox.performance.now()); }
+tick(120);
 
 function checkGeom(tag) {
   const bad = [];
@@ -243,8 +250,7 @@ checkGeom('再竖屏');
 
 /* 转屏后继续跑，确认没有残留的坏坐标 */
 err = null;
-try { for (let i = 0; i < 300; i++) { if (sandbox.__raf) sandbox.__raf(sandbox.performance.now()); } }
-catch (e) { err = e; }
+try { tick(300); } catch (e) { err = e; }
 ok(!err, '转屏后继续跑帧不抛异常' + (err ? '\n   ' + err.stack.split('\n').slice(0, 3).join('\n   ') : ''));
 
 /* ============================================================ */
@@ -310,8 +316,7 @@ tryDraw('横屏 · 三选一', () => {
   G.cardView.update(0.5); G.cardView.draw(ctx); G.cardView.visible = false;
 });
 err = null;
-try { for (let i = 0; i < 300; i++) { if (sandbox.__raf) sandbox.__raf(sandbox.performance.now()); } }
-catch (e) { err = e; }
+try { tick(300); } catch (e) { err = e; }
 ok(!err, '横屏继续跑帧不抛异常' + (err ? '\n   ' + err.stack.split('\n').slice(0, 3).join('\n   ') : ''));
 
 /* ============================================================ */

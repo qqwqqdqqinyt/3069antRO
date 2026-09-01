@@ -63,6 +63,12 @@
       landscapeLayout(L);
     }
 
+    /* 2.5D 梯形投影。默认关闭 —— 正交外观是回归基线，逐屏目检通过后再打开。
+     * depthFar = 最远车道宽度 / 最近车道宽度。0.72 是「看得出纵深」与
+     * 「远排单位仍可辨认」的临界点；再小远排精灵会糊。 */
+    L.depth25d = true;
+    L.depthFar = 0.72;
+
     fitCss(L, vw, vh);
     return L;
   }

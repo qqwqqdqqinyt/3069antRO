@@ -22,8 +22,17 @@
   var started = false;
   var autoWaveTimer = 1.2;
   var stats = { merges: 0, best: 0, casts: 0 };
+  // 多关流程（#19）：编辑器导出的全部关卡；appliedLevelIdx 记录已应用的关卡序号，避免重复重载
+  var LEVELS = [];
+  var appliedLevelIdx = -1;
 
-  var PLANT_COST = { sprout: 20, peashooter: 60, cabbagepult: 140 };
+  var PLANT_COST = { sprout: 20, peashooter: 60, cabbagepult: 140, burningpomegranate: 100 };
+
+  /** 读编辑器导出的 tuning 包（关卡级数值表覆盖）。无则返回 null。 */
+  function pkgTuning() {
+    var ld = (typeof window !== 'undefined' && window.LEVEL_DATA) ? window.LEVEL_DATA : null;
+    return (ld && ld.tuning) ? ld.tuning : null;
+  }
 
   /* ---------------- 启动 ---------------- */
   function boot() {
@@ -36,10 +45,11 @@
 
     global.PlantArt.build();
     global.InsectArt.build();
+    if (global.BeeArt) global.BeeArt.build();   // 蜜蜂（独立美术模块，简单挂载）
 
     // 持久系统（跨局保留存档 / 卡牌 / 单局流程）
-    meta = new global.Meta();
-    cards = new global.Cards();
+    meta = new global.Meta({ tuning: pkgTuning() });
+    cards = new global.Cards({ tuning: pkgTuning() });
     run = new global.Run();
     // 把养成树的永久加成注入卡牌 mod（装饰器模式，可追溯）
     cards.addDecorator(meta.decorator());
@@ -116,14 +126,56 @@
   function buildWorld() {
     global.Bus.reset();
 
+    // 关卡数据接入层（编辑器挂载点①：启动期常量覆盖）
+    // 编辑器导出的 levels.js 挂在 window.LEVEL_DATA；缺失时全部走游戏内默认值，
+    // 行为与旧版完全一致。lanes/cols/nodeX 由响应式 Layout 决定，此处不覆盖。
+    var _ld = (typeof window !== 'undefined' && window.LEVEL_DATA) ? window.LEVEL_DATA : null;
+    var _lv = (_ld && _ld.levels && _ld.levels[0]) ? _ld.levels[0] : null;
+    // 数值表覆盖层（挂载点⑦）：植物造价可由 tuning.economy.plantCost 覆盖（缺省回落默认）。
+    // 注意：tuning 是「整包级」配置（window.LEVEL_DATA.tuning），统一驱动 Meta/Cards/Director/Battlefield。
+    PLANT_COST = Object.assign(
+      { sprout: 20, peashooter: 60, cabbagepult: 140, burningpomegranate: 100 },
+      (_ld && _ld.tuning && _ld.tuning.economy && _ld.tuning.economy.plantCost) || {}
+    );
+    // 多关流程（#19）：记住编辑器导出的全部关卡；首关内容已在上面随 Battlefield 构造注入。
+    // 关卡序号超出手工关卡数时固守最后一关、继续靠 levelScale 递增难度（无尽模式）。
+    LEVELS = (_ld && _ld.levels && _ld.levels.length) ? _ld.levels : [];
+    appliedLevelIdx = LEVELS.length ? 0 : -1;
+
     // 局内系统（每次重建）
-    battle = new global.Battlefield({
+    var battleOpts = {
       x: L.battle.x, y: L.battle.y, w: L.battle.w, h: L.battle.h,
       lanes: L.battleCfg.lanes, cols: L.battleCfg.cols, nodeX: L.battleCfg.nodeX,
+      depth25d: L.depth25d, depthFar: L.depthFar,      // 钩子⑧：2.5D 梯形投影（默认关）
       seed: (Math.random() * 1e9) | 0
+    };
+    if (_lv) {
+      if (Array.isArray(_lv.waves) && _lv.waves.length) battleOpts.waves = _lv.waves;        // 钩子①：波次表
+      battleOpts.obstacles = (_lv.obstacles || []);                                          // 钩子②：障碍物几何
+      battleOpts.display = _lv.display || null;                                              // 钩子③：显示缩放/偏移
+      battleOpts.balance = _lv.balance || null;                                              // 钩子④：数值覆盖层（全局乘子/星枢血量）
+      battleOpts.map = (_lv && _lv.map) ? _lv.map : null;                                    // 钩子⑤：地形（map.tiles / map.effects）
+      battleOpts.tuning = (_ld && _ld.tuning) ? _ld.tuning : null;                           // 钩子⑥/⑦：数值表覆盖（敌人/植物/卡牌/经济常量）
+    }
+    battle = new global.Battlefield(battleOpts);
+    var _boardT = (_lv && _lv.board) || {};
+    board = new global.Board2048({ n: _boardT.n || 5, stepMax: _boardT.stepMax, stepRegen: _boardT.stepRegen, seed: (Math.random() * 1e9) | 0 });
+    director = new global.Director({ board: board, battle: battle, tuning: (_ld && _ld.tuning) ? _ld.tuning : null });
+    if (_lv && Array.isArray(_lv.roulette) && _lv.roulette.length === 6) director.roulette = _lv.roulette.slice();
+
+    // 多关流程（#19 / 挂载点④延伸）：推进时按关卡序号把对应关卡内容（波次/障碍/显示/数值/轮盘）整体换上。
+    // 关卡序号超出手工关卡数则固守最后一关（无尽递增难度）；同一关内容不重复重载。
+    global.Bus.on(EV.CMD_NEXT_LEVEL, function (p) {
+      var lv = (p && p.level) ? p.level : 1;
+      if (!LEVELS.length) return;                       // 无外部关卡数据：行为与旧版一致（只升难度）
+      var ai = Math.min(lv - 1, LEVELS.length - 1);
+      if (ai < 0 || ai >= LEVELS.length) return;
+      if (ai === appliedLevelIdx) return;               // 仍在最后一关无尽递增：只升难度，不改内容
+      appliedLevelIdx = ai;
+      var L = LEVELS[ai];
+      battle.applyLevelContent(L);
+      if (L && Array.isArray(L.roulette) && L.roulette.length === 6) director.roulette = L.roulette.slice();
     });
-    board = new global.Board2048({ n: 5, seed: (Math.random() * 1e9) | 0 });
-    director = new global.Director({ board: board, battle: battle });
 
     battleView = new global.BattleView(battle, rectOf(L.battle));
     boardView = new global.BoardView(board, rectOf(L.board));
@@ -278,19 +330,21 @@
     if (mx + half > W - pad) mx = best.x - half - 16;
     mx = Math.max(pad + half, Math.min(W - pad - half, mx));
 
-    // 纵向：以植物为中心上下各一项，越界则整体平移（保住间距不变）
-    var top = best.y - span / 2, bot = top + span;
+    // 纵向：以植物为中心分布 N 项（当前 3 项：豌豆 / 卷心菜 / 燃芯石榴），越界则整体平移（保住间距）
+    var EVOLVE_KINDS = ['peashooter', 'cabbagepult', 'burningpomegranate'];
+    var n = EVOLVE_KINDS.length;
+    var top = best.y - span * (n - 1) / 2, bot = top + span * (n - 1);
     var minY = bc.y + half + 2, maxY = bc.y + bc.h - half - 2;
     if (top < minY) { bot += minY - top; top = minY; }
     if (bot > maxY) { top -= bot - maxY; bot = maxY; }
     top = Math.max(minY, top);
 
+    var items = [];
+    for (var k = 0; k < n; k++) items.push({ kind: EVOLVE_KINDS[k], x: mx, y: top + span * k });
+
     return {
       lane: best.lane, col: best.col, x: best.x, y: best.y, t: 0, half: half,
-      items: [
-        { kind: 'peashooter', x: mx, y: top },
-        { kind: 'cabbagepult', x: mx, y: top + span }
-      ]
+      items: items
     };
   }
 
@@ -323,7 +377,8 @@
       var best = null, bd = 1e9;
       for (var l = 0; l < battle.cfg.lanes; l++) {
         for (var c = 0; c < battle.cfg.cols; c++) {
-          var sx = battle.slotX(c), sy = battle.slotY(l);
+          // 命中判定要用投影后的坐标 —— 玩家看到的是投影画面，逻辑坐标会对不上
+          var sx = battle.projX(battle.slotX(c), l), sy = battle.slotY(l);
           var d = Math.hypot(p.x - sx, p.y - sy);
           if (d < 40 && d < bd) { bd = d; best = { lane: l, col: c, x: sx, y: sy }; }
         }
@@ -648,7 +703,7 @@
     showHome: showHome,
     // 给测试/编辑器用：算出指定格位上进化菜单的落点（不产生副作用）
     makeEvolveMenu: function (lane, col) {
-      return makeEvolveMenu({ lane: lane, col: col, x: battle.slotX(col), y: battle.slotY(lane) });
+      return makeEvolveMenu({ lane: lane, col: col, x: battle.projX(battle.slotX(col), lane), y: battle.slotY(lane) });
     }
   };
 })(window);

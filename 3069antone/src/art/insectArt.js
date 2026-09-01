@@ -199,6 +199,71 @@
   }
 
   /* ============================================================
+   *  4. 触手蜘蛛 Spider —— 32 x 24
+   *    八条触手而非步足：根粗尖细、带波动，用于「抛出 → 缠绕 → 牵引」。
+   *    靠触手在锚点间摆荡移动，所以身体悬得比蚂蚁高、腹部后坠。
+   * ============================================================ */
+
+  /** 一条触手：两段折线，根段粗、尖端细，腰部随相位摆动 */
+  function tentacle(g, x0, y0, tx, ty, ph, wid, colBase, colTip) {
+    var mx = (x0 + tx) / 2, my = (y0 + ty) / 2;
+    var sway = Math.sin(ph) * 1.5;
+    var c1x = x0 + (mx - x0) * 0.45 + sway * 0.35;
+    var c1y = y0 - 3.0 + Math.cos(ph) * 0.7;
+    var c2x = mx + sway;
+    var c2y = my + 0.8;
+    P.poly(g, [[x0, y0], [c1x, c1y], [c2x, c2y]], wid, colBase);
+    P.poly(g, [[c2x, c2y], [(c2x + tx) / 2 + sway * 0.25, (c2y + ty) / 2], [tx, ty]], wid * 0.62, colTip);
+    P.circ(g, tx, ty, wid * 0.34, colTip);   // 吸盘状末端
+  }
+
+  function drawSpider(g, w, h, f, n) {
+    var t = f / n, ph = t * Math.PI * 2;
+    var ground = h - 1.2;
+    var bob = Math.sin(ph * 2) * 0.6;
+    var cx = w * 0.42, cy = h * 0.50 + bob;      // 头胸部（朝左，故偏左）
+    var ax = w * 0.70, ay = h * 0.46 + bob * 1.2; // 腹部（后坠）
+
+    var far = '#2a1436', near = '#5c2f75', tip = '#7d3fa8';
+
+    // 远侧 4 条：先画，压暗，落点略高（透视上的「里侧」）
+    for (var i = 0; i < 4; i++) {
+      var o = (i - 1.5) * 3.4;
+      tentacle(g, cx + o, cy - 0.8,
+        cx + o - 1.6 + Math.sin(ph + i * 1.7) * 1.1, ground - 1.8,
+        ph + i * 1.7, 1.5, far, far);
+    }
+
+    // 腹部
+    P.ell(g, ax, ay, 7.2, 6.0, '#3a1d4a');
+    P.ell(g, ax - 1.2, ay - 1.4, 5.0, 4.0, '#5c2f75');
+    P.ell(g, ax + 1.0, ay + 0.6, 2.4, 2.0, '#7d3fa8');
+    P.ell(g, ax - 3.4, ay + 1.8, 1.2, 1.0, '#7d3fa8');
+
+    // 头胸部
+    P.ell(g, cx, cy, 5.6, 4.6, '#4a2360');
+    P.ell(g, cx - 0.8, cy - 1.0, 3.6, 2.8, '#6b3390');
+
+    // 四对眼：两大两小，带冷色反光
+    eyeDot(g, cx - 3.2, cy - 1.4, 0.9, true);
+    eyeDot(g, cx - 1.7, cy - 2.3, 0.7, true);
+    P.circ(g, cx + 1.1, cy - 2.1, 0.6, '#9fffe0');
+    P.circ(g, cx - 0.1, cy - 0.5, 0.5, '#9fffe0');
+
+    // 螯肢
+    P.poly(g, [[cx - 4.4, cy + 1.2], [cx - 6.2, cy + 2.6], [cx - 6.8, cy + 4.2]], 1.1, far);
+    P.poly(g, [[cx - 2.2, cy + 2.2], [cx - 3.4, cy + 3.8], [cx - 3.2, cy + 5.2]], 1.1, far);
+
+    // 近侧 4 条：后画，压在身体上
+    for (var j = 0; j < 4; j++) {
+      var o2 = (j - 1.5) * 3.4;
+      tentacle(g, cx + o2, cy + 0.6,
+        cx + o2 + 1.0 + Math.sin(ph + j * 1.3) * 1.4, ground,
+        ph + j * 1.7 + 0.6, 1.7, near, tip);
+    }
+  }
+
+  /* ============================================================
    *  命中 / 死亡特效精灵
    * ============================================================ */
   function drawSplat(g, w, h, f, n, big) {
@@ -321,10 +386,12 @@
     }), { outline: '#2b0a04' });
 
     Art.beetle = P.makeSprite(30, 21, WALK, drawBeetle, { outline: '#0a0e18' });
+    Art.spider = P.makeSprite(32, 24, WALK, drawSpider, { outline: '#150a1c' });
 
     Art.ant._flash = P.makeFlash(Art.ant, '#ffe9e0');
     Art.fireant._flash = P.makeFlash(Art.fireant, '#fff0c8');
     Art.beetle._flash = P.makeFlash(Art.beetle, '#dfe8ff');
+    Art.spider._flash = P.makeFlash(Art.spider, '#e8d4ff');
 
     // 特效
     Art.splatPea = P.makeSprite(12, 12, 6, function (g, w, h, f, n) { drawSplat(g, w, h, f, n, false); }, { outline: '#1e4a17', cut: 0.3 });
@@ -354,7 +421,8 @@
     KIND: {
       ant: { name: '普通蚂蚁', scale: 3, hp: 95, speed: 0.35, dmg: 5, armor: 0, gold: 4, w: 22, h: 17 },
       fireant: { name: '红火蚁', scale: 3, hp: 85, speed: 0.75, dmg: 3, armor: 0, gold: 6, w: 22, h: 17 },
-      beetle: { name: '天牛', scale: 3, hp: 190, speed: 0.22, dmg: 12, armor: 0.3, gold: 12, w: 30, h: 21 }
+      beetle: { name: '天牛', scale: 3, hp: 190, speed: 0.22, dmg: 12, armor: 0.3, gold: 12, w: 30, h: 21 },
+      spider: { name: '触手蜘蛛', scale: 3, hp: 260, speed: 0.30, dmg: 14, armor: 0.1, gold: 22, w: 32, h: 24 }
     }
   };
 })(window);
