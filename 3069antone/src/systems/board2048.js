@@ -7,7 +7,7 @@
  *    · 对外只暴露：grid、steps、tier、move()、update()、reset()
  *
  *  与 GDD v0.2 的对应：
- *    5x5 棋盘 / 每步生成 1 块 / 步数上限 5 / 1.5s 回复 1 步
+ *    5x5 棋盘 / 每步生成 1 块 / 步数上限 10 / 1s 回复 1 步
  *    生成池按关卡分 5 档（弱分层 M2） / 棋盘跨关保留 BOARD_CARRY=1
  * ============================================================ */
 (function (global) {
@@ -29,8 +29,8 @@
     this.seed = opts.seed || (Date.now() & 0xffff);
     this.rng = new global.RNG(this.seed);
 
-    this.stepMax = opts.stepMax !== undefined ? opts.stepMax : 5;
-    this.stepRegen = opts.stepRegen !== undefined ? opts.stepRegen : 1.5;
+    this.stepMax = opts.stepMax !== undefined ? opts.stepMax : 10;
+    this.stepRegen = opts.stepRegen !== undefined ? opts.stepRegen : 1;
     this.spawnPerMove = 1;
     this.initTiles = 2;
 

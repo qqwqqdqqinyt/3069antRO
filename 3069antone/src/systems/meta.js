@@ -2,9 +2,15 @@
  *  Meta —— 元游戏系统（永久养成 / 花园 / 商店 / 存档）
  *
  *  职责边界：
- *    · 只管「局与局之间」的东西：养成树、花园、商店、图鉴、存档
+ *    · 只管「局与局之间」的东西：养成树、商店、图鉴、存档
  *    · 不参与局内循环，不认识 Board / Battle
- *    · 对外只提供 profile（存档数据）+ metaMod()（永久加成）
+ *    · 对外只提供 profile（存档数据）+ decorator()（永久加成）
+ *
+ *  ★ 花园（2026-09-02 改造）：
+ *    旧的「种植物 → 收星尘」花园已彻底移除，改为「室内花园」——
+ *    里面只养一株培育植物（宠物），玩法见 systems/pet.js。
+ *    星尘产出随之取消，星尘改由关卡结算给（见 run.js finish()）。
+ *    本文件只保留宠物相关的存档字段与商店项，不含任何宠物逻辑。
  *
  *  养成占比红线（GDD v0.1 §13.4）：
  *    永久养成必须弱于局内卡牌，否则肉鸽三选一会沦为过场动画。
@@ -41,8 +47,8 @@
     },
     fruit: {
       name: '果实', icon: '果', color: '#ffc95e', maxLv: 10,
-      desc: '经济侧：金币 +4% / 碎片 +6% / 花园产出 +5%',
-      per: '金币 +4%，碎片 +6%，花园产出 +5%'
+      desc: '经济侧：金币 +4% / 碎片 +6% / 材料掉落 +5%',
+      per: '金币 +4%，碎片 +6%，材料掉落 +5%'
     }
   };
 
@@ -50,30 +56,14 @@
   var UPGRADE_COST = { base: 40, pow: 1.30 };
   function upCost(level) { return Math.round(UPGRADE_COST.base * Math.pow(UPGRADE_COST.pow, level - 1)); }
 
-  /* ---------------- 花园 ----------------
-   * 产出速率 = 稀有度基础 × (1 + 星级×0.1) × (1 + 花园等级×0.05)
-   * 离线计时上限 12 小时（防纯挂机，同时保证次日回归有收益）
+  /* ---------------- 商店 ----------------
+   * ★ 2026-09-02 改造：旧花园的「花盆 pot3~6」随花园一并移除，
+   *   换成「培育槽位 petslot2 / petslot3」—— 主人定：等另外两条异变链
+   *   开放后，用商店扩编队，让多株培育植物同场作战。
+   * ★ 基础材料出售 + 宠物血瓶来自 data/basicMat.js，保持数值同源。
+   *   （加载顺序：data/*.js 必须先于 systems/*.js，见 index.html）
    */
-  var RARITY_BASE = { common: 8, rare: 15, epic: 28, legend: 50 };
-  var RARITY_CN = { common: '普通', rare: '稀有', epic: '史诗', legend: '传说' };
-
-  var PLANTS = {
-    sprout: { name: '牙苗', rarity: 'common', base: 8 },
-    peashooter: { name: '豌豆射手', rarity: 'rare', base: 15 },
-    cabbagepult: { name: '卷心菜投手', rarity: 'epic', base: 28 }
-  };
-
-  var DURATIONS = [
-    { key: '30m', name: '30 分钟', h: 0.5 },
-    { key: '2h', name: '2 小时', h: 2 },
-    { key: '6h', name: '6 小时', h: 6 }
-  ];
-
-  // 抽成对象，便于外部数值表覆盖
-  var CAP = { offlineH: 12 };
-
-  /* ---------------- 商店 ---------------- */
-  var SHOP = [
+  var BASE_SHOP = [
     {
       id: 'slot4', name: '编队位 · 第 4 位', cost: { gold: 5000, material: 0 },
       desc: '编队位 3 → 4（伙伴位按 50% 效率计入战力）',
@@ -90,20 +80,14 @@
       requires: 'slot5'
     },
     {
-      id: 'pot3', name: '花盆 · 第 3 个', cost: { gold: 5000 },
-      desc: '花园花盆 2 → 3', tag: 'garden', once: true
+      id: 'petslot2', name: '培育槽位 · 第 2 位', cost: { gold: 30000, material: 5 },
+      desc: '可同时派出的培育植物 1 → 2（需已拥有第二株培育植物）',
+      tag: 'pet', once: true
     },
     {
-      id: 'pot4', name: '花盆 · 第 4 个', cost: { gold: 20000 },
-      desc: '花园花盆 3 → 4', tag: 'garden', once: true, requires: 'pot3'
-    },
-    {
-      id: 'pot5', name: '花盆 · 第 5 个', cost: { gold: 60000 },
-      desc: '花园花盆 4 → 5', tag: 'garden', once: true, requires: 'pot4'
-    },
-    {
-      id: 'pot6', name: '花盆 · 第 6 个', cost: { gold: 150000 },
-      desc: '花园花盆 5 → 6', tag: 'garden', once: true, requires: 'pot5'
+      id: 'petslot3', name: '培育槽位 · 第 3 位', cost: { gold: 100000, material: 15 },
+      desc: '可同时派出的培育植物 2 → 3（需已拥有第三株培育植物）',
+      tag: 'pet', once: true, requires: 'petslot2'
     },
     {
       id: 'hex', name: '棋盘元素地格', cost: { material: 8 },
@@ -112,24 +96,41 @@
     }
   ];
 
+  /* 合并基础材料 / 宠物血瓶商店项（数值同源，见 data/basicMat.js） */
+  var SHOP = BASE_SHOP.concat(global.BasicMat ? global.BasicMat.SHOP_ITEMS : []);
+
   /* ============================================================ */
 
+  /**
+   * ★ version 2（2026-09-02）：旧花园（gardenLevel / pots / garden）拆除，
+   *   改为「室内花园」只养培育植物。旧档 load() 时会自动迁移 ——
+   *   星尘、养成树、编队、图鉴全部保留，只是花园没了。
+   */
   function blankProfile() {
     return {
-      version: 1,
+      version: 2,
       stardust: 0,
       gold: 0, shard: 0, material: 0, core: 0,
       upgrades: { root: 0, branch: 0, bud: 0, fruit: 0 },
-      gardenLevel: 1,
-      pots: 2,
-      garden: [null, null],          // {kind, plantedAt, duration}
+
+      /* ---- 培育植物（宠物）：数据在这里，逻辑全在 systems/pet.js ---- */
+      petChoice: null,      // 'red' | 'green' | 'withered' —— 三选一，选完永不可改
+      pets: [],             // [{id, kind, level, exp, hp, tickAt, waterUntil, waterCdAt, bornAt}]
+      // ★ 常驻编队：玩家拥有的、允许被派出的 pet id。choose() 时写入，之后只增不减。
+      //   它**不是**「局内已派出几只」—— 那个由 Pet._battleId 表达（每局清空）。
+      //   拿 petParty 当局内计数会用一次就永远满编（详见 Pet.canDeploy 注释）。
+      petParty: [],
+      petSlots: 1,          // 可同时派出的培育植物数（商店 petslot2/3 扩编队）
+      materials: {},        // 进化材料字典 {redtomato: n, smallchili: n}
+      basic: 0,             // 基础材料：关卡掉落，只能卖钱（1 : 1）
+
       plants: {
         sprout: { unlocked: true, star: 1, level: 1 },
         peashooter: { unlocked: true, star: 1, level: 1 },
         cabbagepult: { unlocked: true, star: 1, level: 1 }
       },
       formationSlots: 3,
-      party: ['peashooter'],
+      party: ['peashooter'],         // ★ 养成树编队（植物 kind），不是培育植物
       boardHexes: [],                // {r, c, element}
       bought: {},                    // 一次性商店项
       stats: { runs: 0, bestLevel: 0, totalKills: 0, bestTile: 0, totalStardust: 0 },
@@ -153,12 +154,8 @@
   }
 
   Meta.UPGRADES = UPGRADES;
-  Meta.PLANTS = PLANTS;
   Meta.SHOP = SHOP;
-  Meta.DURATIONS = DURATIONS;
-  Meta.RARITY_BASE = RARITY_BASE;
-  Meta.RARITY_CN = RARITY_CN;
-  Meta.CAP = CAP;
+  Meta.BASE_SHOP = BASE_SHOP;
   Meta.UPGRADE_COST = UPGRADE_COST;
   Meta.upCost = upCost;
   Meta.SAVE_KEY = SAVE_KEY;
@@ -186,8 +183,8 @@
       p.upgrades = Object.assign({ root: 0, branch: 0, bud: 0, fruit: 0 }, o.upgrades || {});
       p.stats = Object.assign(blankProfile().stats, o.stats || {});
       p.plants = Object.assign(blankProfile().plants, o.plants || {});
-      p.garden = (o.garden && o.garden.length) ? o.garden : [null, null];
-      while (p.garden.length < p.pots) p.garden.push(null);
+      // 培育植物字段迁移（旧档没有 → 补空，靠 Pet 系统自己填）
+      if (global.Pet) global.Pet.migrate(p);
       return p;
     } catch (e) {
       console.warn('[Meta] 存档损坏，已重置', e);
@@ -216,8 +213,6 @@
     var self = this;
     global.Bus.on(EV.CMD_UPGRADE, function (p) { self.buyUpgrade(p.key); }, this);
     global.Bus.on(EV.CMD_SHOP_BUY, function (p) { self.buyShop(p.key, p.arg); }, this);
-    global.Bus.on(EV.CMD_GARDEN_PLANT, function (p) { self.plant(p.slot, p.kind, p.duration); }, this);
-    global.Bus.on(EV.CMD_GARDEN_HARVEST, function (p) { self.harvest(p.slot); }, this);
     global.Bus.on(EV.CMD_SAVE, function () { self.save(); }, this);
     // 每局结束自动吸收结算收益
     global.Bus.on(EV.RUN_GAME_OVER, function (s) { self.absorbSettlement(s); }, this);
@@ -251,67 +246,17 @@
     return true;
   };
 
-  /* ---------------- 花园 ---------------- */
+  /* ---------------- 室内花园（培育植物） ----------------
+   * 花园本身不再产出任何资源 —— 它只是培育植物待的地方。
+   * 所有宠物逻辑（喂养 / 浇水 / 进化 / 回血 / 出战）都在 systems/pet.js，
+   * 这里只留几个只读查询，方便 view 不用到处摸 profile 的内部结构。
+   */
 
-  /** 某株植物在花园的星尘产出速率（星尘/小时） */
-  Meta.prototype.yieldRate = function (kind) {
-    var p = PLANTS[kind];
-    if (!p) return 0;
-    var plant = this.profile.plants[kind] || { star: 1 };
-    var fruit = this.upLevel('fruit');
-    return p.base
-      * (1 + (plant.star || 1) * 0.1)
-      * (1 + this.profile.gardenLevel * 0.05)
-      * (1 + fruit * 0.05);
-  };
-
-  Meta.prototype.plant = function (slot, kind, durationKey) {
-    if (slot < 0 || slot >= this.profile.pots) return false;
-    if (!PLANTS[kind]) return false;
-    var d = null;
-    for (var i = 0; i < DURATIONS.length; i++) if (DURATIONS[i].key === durationKey) d = DURATIONS[i];
-    if (!d) d = DURATIONS[0];
-    if (this.profile.garden[slot]) { toast('该花盆正在使用中', 'bad'); return false; }
-    this.profile.garden[slot] = { kind: kind, plantedAt: Date.now(), duration: d.key, hours: d.h };
-    this.save();
-    global.Bus.emit(EV.META_CHANGED, { profile: this.profile });
-    toast('种下 ' + PLANTS[kind].name + ' · ' + d.name, 'good');
-    return true;
-  };
-
-  /** 花盆进度：0–1；返回 null 表示空盆 */
-  Meta.prototype.potProgress = function (slot) {
-    var g = this.profile.garden[slot];
-    if (!g) return null;
-    var elapsedH = (Date.now() - g.plantedAt) / 3600000;
-    return M.clamp(elapsedH / g.hours, 0, 1);
-  };
-
-  /** 可收获星尘（离线最多累计 CAP.offlineH 小时） */
-  Meta.prototype.potYield = function (slot) {
-    var g = this.profile.garden[slot];
-    if (!g) return 0;
-    var elapsedH = Math.min((Date.now() - g.plantedAt) / 3600000, CAP.offlineH);
-    return Math.floor(this.yieldRate(g.kind) * Math.min(elapsedH, g.hours));
-  };
-
-  Meta.prototype.harvest = function (slot) {
-    var g = this.profile.garden[slot];
-    if (!g) return 0;
-    var prog = this.potProgress(slot);
-    if (prog < 1) {
-      toast('还没成熟（' + Math.floor(prog * 100) + '%）', 'bad');
-      return 0;
-    }
-    var y = this.potYield(slot);
-    this.profile.stardust += y;
-    this.profile.stats.totalStardust = (this.profile.stats.totalStardust || 0) + y;
-    this.profile.garden[slot] = null;
-    this.save();
-    global.Bus.emit(EV.META_CHANGED, { profile: this.profile });
-    toast('收获 +' + y + ' 星尘', 'good');
-    return y;
-  };
+  /** 主力培育植物（v1 只有一只） */
+  Meta.prototype.pet = function () { return this.profile.pets[0] || null; };
+  Meta.prototype.hasPet = function () { return this.profile.pets.length > 0; };
+  /** 是否已做过首次三选一 */
+  Meta.prototype.petChosen = function () { return !!this.profile.petChoice; };
 
   /* ---------------- 商店 ---------------- */
 
@@ -341,6 +286,18 @@
     if (st === 'owned') { toast('已拥有', 'bad'); return false; }
     if (st === 'poor') { toast('资源不足', 'bad'); return false; }
 
+    // ★ 基础材料出售 / 宠物血瓶：实际效果要动宠物的血条与材料库存，
+    //   逻辑都在 Pet 系统里。这里只做门面转发，不在 Meta 侧重复扣钱，
+    //   否则会出现「钱扣了两次、血没回」的经典 bug。
+    if (item.tag === 'basic') {
+      global.Bus.emit(EV.CMD_BASIC_SELL, { count: 'all' });
+      return true;
+    }
+    if (item.tag === 'potion') {
+      global.Bus.emit(EV.CMD_PET_POTION, { id: item.id });
+      return true;
+    }
+
     this.profile.gold -= (item.cost.gold || 0);
     this.profile.material -= (item.cost.material || 0);
     this.profile.shard -= (item.cost.shard || 0);
@@ -348,9 +305,8 @@
 
     if (item.id === 'slot4' || item.id === 'slot5' || item.id === 'slot6') {
       this.profile.formationSlots++;
-    } else if (item.id.indexOf('pot') === 0) {
-      this.profile.pots++;
-      while (this.profile.garden.length < this.profile.pots) this.profile.garden.push(null);
+    } else if (item.id === 'petslot2' || item.id === 'petslot3') {
+      this.profile.petSlots++;
     } else if (item.id === 'hex') {
       // 元素地格：arg = {r, c, element}
       if (arg) this.profile.boardHexes.push({ r: arg.r, c: arg.c, element: arg.element });
@@ -372,6 +328,12 @@
     p.material += Math.floor(s.kept.material || 0);
     p.core += Math.floor(s.kept.core || 0);
     p.stardust += Math.floor(s.kept.stardust || 0);
+    // 培育材料：进化材料是字典，要逐个累加；基础材料是单数量
+    var km = s.kept.materials;
+    if (km) {
+      for (var mk in km) p.materials[mk] = (p.materials[mk] || 0) + Math.floor(km[mk] || 0);
+    }
+    p.basic = Math.floor((p.basic || 0) + (s.kept.basic || 0));
     p.stats.runs++;
     if (s.level > p.stats.bestLevel) p.stats.bestLevel = s.level;
     if (s.stats) {
@@ -403,6 +365,8 @@
       if (fruit) {
         m.goldMult *= (1 + fruit * 0.04);
         m.shardMult *= (1 + fruit * 0.06);
+        // 2026-09-02：花园不再产星尘，「果实」的第三条加成改为材料掉落率
+        if (typeof m.matDrop === 'number') m.matDrop *= (1 + fruit * 0.05);
       }
       // 根系：步数回复 +3%/级（步数上限与充能条由 Board / Director 侧读取 meta 提供）
       if (root) m.stepRegen *= (1 + root * 0.03);

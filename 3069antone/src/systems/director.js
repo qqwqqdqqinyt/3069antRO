@@ -30,6 +30,27 @@
     STAR_POW: [1.0, 2.0, 3.5, 6.0, 10.0, 16.0, 25.0]
   };
 
+  /* ---------------- 培育材料掉落表 ----------------
+   * 主人 2026-09-02 定：第一关 22% 概率各掉 1 个红番茄 / 小辣椒。
+   * 基础材料（只能卖钱，1:1）单独一条，50% 掉 1 个。
+   *
+   * ★ 两类材料别混（它们的消费路径完全不同）：
+   *     materials —— 进化材料字典，喂宠物 or 进化
+   *     basic     —— 基础材料，只能卖金币
+   *
+   * ★ 每个敌人独立判定，不是「整关保底」。想要关卡专属掉落表，
+   *   往 DROP.materials 里加关卡号即可，缺的关卡回落到第 1 关。
+   */
+  var DROP = {
+    materials: {
+      1: [
+        { key: 'redtomato', rate: 0.22, n: 1 },
+        { key: 'smallchili', rate: 0.22, n: 1 }
+      ]
+    },
+    basic: { rate: 0.50, n: 1 }
+  };
+
   function Director(opts) {
     opts = opts || {};
     this.board = opts.board;
@@ -38,7 +59,12 @@
     this.charge = 0;
     this.lastElement = null;
     this.streak = 0;
-    this.currency = { stardust: 0, shard: 0, gold: 0, material: 0, core: 0, star: 0 };
+    this.level = 1;              // 当前关卡（决定用哪张掉落表）
+    this.currency = {
+      stardust: 0, shard: 0, gold: 0, material: 0, core: 0, star: 0,
+      materials: {},             // 进化材料字典 {redtomato: n, …}
+      basic: 0                   // 基础材料（卖钱用）
+    };
     this.roulette = ['thunder', 'fire', 'ice', 'wood', 'water', 'light'];
     this.wheelPtr = 0;
     this.casts = { small: 0, overload: 0 };
@@ -50,7 +76,8 @@
     this.mod = {
       chargeGain: 1, chainCharge: 1, cvMult: 1, poolMult: 1,
       overloadGate: 256, starBonus: 0,
-      goldMult: 1, shardMult: 1, starMult: 1, matAdd: 0, stepGiftAdd: 0
+      goldMult: 1, shardMult: 1, starMult: 1, matAdd: 0, stepGiftAdd: 0,
+      matDrop: 1            // 材料掉落率倍率（养成树「果实」分支 +5%/级）
     };
 
     // 核心常量副本（实例级）：数值表覆盖层（挂载点⑦）可经 opts.tuning.economy 覆盖
@@ -74,6 +101,7 @@
     var self = this;
     global.Bus.on(EV.BOARD_MERGE, function (m) { self.onMerge(m); }, this);
     global.Bus.on(EV.WAVE_START, function (p) {
+      if (p.level) self.level = p.level;
       if (self.board) self.board.grantSteps(self.K.STEP_GIFT + self.mod.stepGiftAdd);
       global.Bus.emit(EV.TOAST, { text: '第 ' + p.wave + ' 波 · ' + (p.intent || ''), kind: 'wave' });
     }, this);
@@ -91,6 +119,11 @@
       self.currency.gold += p.enemy.gold * self.mod.goldMult;
       // 拾荒：护甲敌人额外掉材料（掉落数 = 1 基础 + 卡层数）
       if (p.enemy.armor > 0.2) self.currency.material += 1 + self.mod.matAdd;
+      // 培育材料掉落（进化材料 + 基础材料，逐个独立判定）
+      var items = self.rollDrop(p.enemy);
+      if (items.length) {
+        global.Bus.emit(EV.MATERIAL_DROP, { items: items, enemy: p.enemy });
+      }
       self._emitCurrency();
     }, this);
     global.Bus.on(EV.BOARD_JAMMED, function () {
@@ -100,7 +133,8 @@
     // 卡牌修正：按字段取值
     global.Bus.on(EV.MOD_CHANGED, function (p) {
       var keys = ['chargeGain', 'chainCharge', 'cvMult', 'poolMult', 'overloadGate',
-        'starBonus', 'goldMult', 'shardMult', 'starMult', 'matAdd', 'stepGiftAdd'];
+        'starBonus', 'goldMult', 'shardMult', 'starMult', 'matAdd', 'stepGiftAdd',
+        'matDrop'];
       for (var i = 0; i < keys.length; i++) self.mod[keys[i]] = p.mod[keys[i]];
     }, this);
   };
@@ -212,6 +246,39 @@
 
   Director.prototype._emitCurrency = function () {
     global.Bus.emit(EV.CURRENCY, this.currency);
+  };
+
+  /* ---------------- 培育材料掉落 ---------------- */
+
+  /** 该关卡的进化材料掉落表（缺配置时回落到第 1 关） */
+  Director.prototype.dropTable = function (level) {
+    return DROP.materials[level] || DROP.materials[1] || [];
+  };
+
+  /**
+   * 一次击杀的材料掉落投骰 —— 每个条目独立判定，不是「整关保底」。
+   * 概率受养成树「果实」分支加成（mod.matDrop，+5%/级）。
+   * @returns [{key, count}] 本次实际掉到的东西（什么都没掉则空数组）
+   */
+  Director.prototype.rollDrop = function () {
+    var mult = this.mod.matDrop || 1;
+    var got = [];
+    var table = this.dropTable(this.level || 1);
+
+    for (var i = 0; i < table.length; i++) {
+      var t = table[i];
+      if (Math.random() < t.rate * mult) {
+        var n = t.n || 1;
+        this.currency.materials[t.key] = (this.currency.materials[t.key] || 0) + n;
+        got.push({ key: t.key, count: n });
+      }
+    }
+    var b = DROP.basic;
+    if (Math.random() < b.rate * mult) {
+      this.currency.basic += b.n;
+      got.push({ key: 'basic', count: b.n });
+    }
+    return got;
   };
 
   Director.prototype.update = function (dt) {

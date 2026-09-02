@@ -120,9 +120,24 @@
     META_CHANGED: 'meta:changed',        // {profile}
     CMD_SHOP_BUY: 'cmd:meta:shopBuy',    // {key}
     CMD_UPGRADE: 'cmd:meta:upgrade',     // {key}
-    CMD_GARDEN_PLANT: 'cmd:meta:gardenPlant', // {slot, kind}
-    CMD_GARDEN_HARVEST: 'cmd:meta:gardenHarvest',
-    CMD_SAVE: 'cmd:meta:save'            // 手动存档
+    CMD_SAVE: 'cmd:meta:save',           // 手动存档
+    // （旧花园的 CMD_GARDEN_PLANT / CMD_GARDEN_HARVEST 已随花园一起删除，勿再引用）
+
+    // ---- Pet（培育植物 / 宠物养成） ----
+    PET_CHANGED: 'pet:changed',          // {pet}   宠物任一字段变化
+    PET_LEVELUP: 'pet:levelUp',          // {pet, level}
+    PET_EVOLVED: 'pet:evolved',          // {pet, from, to}
+    PET_HEALED: 'pet:healed',            // {pet, amount, source}
+    MATERIAL_DROP: 'run:materialDrop',   // {items:[{key,count}], enemy}  关卡掉落培育材料
+    CMD_PET_CHOOSE: 'cmd:pet:choose',    // {variant}  首次三选一（选完永不可改）
+    CMD_PET_FEED: 'cmd:pet:feed',        // {key}      喂材料换经验
+    CMD_PET_WATER: 'cmd:pet:water',      //            浇水施肥：加速恢复 + 少量经验
+    CMD_PET_EVOLVE: 'cmd:pet:evolve',    // {to}       分支进化
+    CMD_PET_POTION: 'cmd:pet:potion',    // {id}       买血瓶立即回血
+    CMD_BASIC_SELL: 'cmd:basic:sell',    // {count}    基础材料卖金币（count='all' 全卖）
+    CMD_FORGE_OPEN: 'cmd:forge:open',    //            打开「异变工坊」合成屏
+    CMD_FORGE_CLOSE: 'cmd:forge:close',
+    CMD_PET_PANEL: 'cmd:pet:panel'       // {open}     战场左上角培育植物面板
   };
 
   global.Bus = Bus;

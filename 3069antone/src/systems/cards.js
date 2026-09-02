@@ -56,6 +56,7 @@
 
       // 经济
       goldMult: 1, shardMult: 1, starMult: 1, matAdd: 0,
+      matDrop: 1,           // 培育材料掉落率倍率（养成树「果实」分支 +5%/级）
 
       // 生存
       nodeMaxAdd: 0, leakDmgMult: 1, waveHeal: 0,

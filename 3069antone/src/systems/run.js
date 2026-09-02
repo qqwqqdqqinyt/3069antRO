@@ -26,7 +26,9 @@
     FAIL_KEEP: 0.40,      // b：失败保底比例
     WAVES_PER_LEVEL: 5,
     // 各货币折算成「价值单位」的权重 —— 只用于 EV 比较，不显示给玩家
-    VALUE: { gold: 1.0, shard: 12.0, material: 40.0, core: 30.0, star: 8.0, stardust: 6.0 }
+    // basic 基础材料 1:1 换金币，所以权重 1.0；
+    // 进化材料（materials 字典）是养成必需品，不参与 EV 折算（避免把养成成本算成收益）。
+    VALUE: { gold: 1.0, shard: 12.0, material: 40.0, core: 30.0, star: 8.0, stardust: 6.0, basic: 1.0 }
   };
 
   function Run(opts) {
@@ -72,14 +74,41 @@
 
   /* ---------------- 钱包快照 ---------------- */
 
+  /**
+   * 空钱包模板。
+   * ★ 注意 materials 是**字典**（进化材料分种类），basic 是单数量 ——
+   *   两者都不能走「直接乘比例」的通用逻辑，凡遍历钱包的地方都要跳过 materials。
+   */
+  Run.prototype._blankWallet = function () {
+    return {
+      gold: 0, shard: 0, material: 0, core: 0, star: 0, stardust: 0,
+      materials: {},    // {redtomato: n, smallchili: n, …}
+      basic: 0          // 基础材料（关卡掉落 → 卖金币）
+    };
+  };
+
   /** 从 Director 取当前钱包；Director 不存在时返回空钱包（保证可独立运行） */
   Run.prototype.wallet = function () {
     var d = global.__GAME && global.__GAME.director;
     var c = d ? d.currency : null;
-    return {
-      gold: c ? c.gold : 0, shard: c ? c.shard : 0, material: c ? c.material : 0,
-      core: c ? c.core : 0, star: c ? c.star : 0, stardust: c ? c.stardust : 0
-    };
+    var w = this._blankWallet();
+    if (!c) return w;
+    for (var k in w) if (k !== 'materials') w[k] = c[k] || 0;
+    // 字典要拷贝快照 —— 否则 earned 会拿到同一份引用，永远算成 0
+    var cm = c.materials || {};
+    for (var mk in cm) w.materials[mk] = cm[mk];
+    return w;
+  };
+
+  /** 两个钱包相减（earned = 本关赚了多少） */
+  Run.prototype._walletDiff = function (w, start) {
+    var e = this._blankWallet();
+    for (var k in w) if (k !== 'materials') e[k] = (w[k] || 0) - (start[k] || 0);
+    var sm = start.materials || {}, wm = w.materials || {}, keys = {};
+    for (var a in sm) keys[a] = 1;
+    for (var b in wm) keys[b] = 1;
+    for (var mk in keys) e.materials[mk] = (wm[mk] || 0) - (sm[mk] || 0);
+    return e;
   };
 
   Run.prototype.valueOf = function (w) {
@@ -96,9 +125,8 @@
     this.state = 'decision';
 
     var w = this.wallet();
-    var start = this._walletAtLevelStart || { gold: 0, shard: 0, material: 0, core: 0, star: 0, stardust: 0 };
-    var earned = {};
-    for (var k in w) earned[k] = (w[k] || 0) - (start[k] || 0);
+    var start = this._walletAtLevelStart || this._blankWallet();
+    var earned = this._walletDiff(w, start);
 
     // P = 当前累积池；R = 本关收益 × 递增倍率（下一关的预期增量）
     var P = this.valueOf(w);
@@ -203,12 +231,20 @@
     this.outcome = outcome;
 
     var w = this.wallet();
-    var kept = {}, lost = {};
+    var kept = this._blankWallet(), lost = this._blankWallet();
     for (var k in w) {
+      if (k === 'materials') continue;
       kept[k] = (w[k] || 0) * keepRatio;
       lost[k] = (w[k] || 0) * (1 - keepRatio);
     }
-    // 星尘只在结算时给（GDD：花园为主、收工为辅）
+    // 进化材料按比例保留，向下取整（余数算丢失 —— 半个番茄不叫番茄）
+    for (var mk in (w.materials || {})) {
+      var n = w.materials[mk] || 0;
+      var kp = Math.floor(n * keepRatio);
+      kept.materials[mk] = kp;
+      lost.materials[mk] = n - kp;
+    }
+    // 星尘只在结算时给（2026-09-02：旧花园的星尘产出取消，改由这里独供）
     var stardust = Math.round(Math.pow(this.level, 1.35) * 6 * keepRatio);
     kept.stardust = (kept.stardust || 0) + stardust;
 
@@ -257,7 +293,7 @@
     this.settle = null;
     this.lv = this._blankLevel();
     this.history = [];
-    this._walletAtLevelStart = { gold: 0, shard: 0, material: 0, core: 0, star: 0, stardust: 0 };
+    this._walletAtLevelStart = this._blankWallet();
   };
 
   global.Run = Run;

@@ -84,17 +84,17 @@
     this.portrait = !!opts.portrait;
     this.t = 0;
     this.screen = 'none';       // none | decision | settle | home
-    this.tab = 'upgrade';       // upgrade | garden | shop | codex
+    this.tab = 'upgrade';       // upgrade | pet | shop | codex
     this.hover = null;
     this.buttons = [];
-    this.plantPick = null;      // 花园：当前选择的植物/时长
+    this.pet = opts.pet || null;     // Pet 系统（培育植物）—— 只读查询 + 发指令
+    this.forge = opts.forge || null; // Forge 门面 —— petInfo() 等摘要
     this.hexPick = null;        // 商店：正在放置的元素地格
     this.onStart = opts.onStart || null;
 
     var self = this;
     global.Bus.on(EV.RUN_DECISION, function (d) { self.screen = 'decision'; self.decision = d; }, this);
     global.Bus.on(EV.RUN_GAME_OVER, function (s) { self.screen = 'settle'; self.settle = s; }, this);
-    global.Bus.on(EV.META_CHANGED, function () { self.plantPick = null; }, this);
   }
 
   MetaView.prototype.show = function (s) { this.screen = s || 'home'; this.buttons = []; };
@@ -137,16 +137,8 @@
       case 'tab': this.tab = a.tab; this.buttons = []; break;
       case 'upgrade': global.Bus.emit(EV.CMD_UPGRADE, { key: a.key }); break;
       case 'shop': global.Bus.emit(EV.CMD_SHOP_BUY, { key: a.key, arg: a.arg }); break;
-      case 'plantPick': this.plantPick = { kind: a.kind }; break;
-      case 'plant':
-        if (this.plantPick) {
-          global.Bus.emit(EV.CMD_GARDEN_PLANT, {
-            slot: a.slot, kind: this.plantPick.kind, duration: a.duration
-          });
-          this.plantPick = null;
-        }
-        break;
-      case 'harvest': global.Bus.emit(EV.CMD_GARDEN_HARVEST, { slot: a.slot }); break;
+      case 'forge': global.Bus.emit(EV.CMD_FORGE_OPEN, {}); break;
+      case 'petWater': global.Bus.emit(EV.CMD_PET_WATER, {}); break;
       case 'start': if (this.onStart) this.onStart(); break;
       case 'wipe': this.meta.wipe(); break;
     }
@@ -564,7 +556,8 @@
 
   /** 顶部四个 Tab（横竖屏共用，宽度自适应） */
   MetaView.prototype._tabs = function (ctx, x, y, w, h) {
-    var tabs = [['upgrade', '养成树'], ['garden', '花园'], ['shop', '商店'], ['codex', '图鉴']];
+    // 花园已彻底改造为「室内花园」（培育）—— 只养选定的那株异变植物，不再产星尘
+    var tabs = [['upgrade', '养成树'], ['pet', '培育'], ['shop', '商店'], ['codex', '图鉴']];
     var gap = 6;
     var tw = (w - gap * (tabs.length - 1)) / tabs.length;
     var fs = h >= 34 ? 13 : 12.5;
@@ -607,17 +600,33 @@
     ctx.restore();
   };
 
-  /** 底部「开始新的一局」+ 历史统计 */
+  /** 底部「异变工坊」+「开始新的一局」+ 历史统计 */
   MetaView.prototype._startBar = function (ctx, bw, bh, fs) {
     var W = this.W, H = this.H, p = this.meta.profile;
-    this._btn('start', W / 2 - bw / 2, H - bh - 16, bw, bh, '开 始 新 的 一 局', '#9fe8b0',
-      { type: 'start' }, { fs: fs });
+    var fw = Math.min(190, bw * 0.6);
+    var stack = (bw + fw + 12) > (W - 40);      // 放不下就上下叠（竖屏）
+    var by = H - bh - 16;
+
+    if (stack) {
+      this._btn('forge', W / 2 - fw / 2, by - (bh + 10), fw, bh, '异 变 工 坊',
+        '#d8ffc0', { type: 'forge' }, { fs: fs - 2 });
+      this._btn('start', W / 2 - bw / 2, by, bw, bh, '开 始 新 的 一 局', '#9fe8b0',
+        { type: 'start' }, { fs: fs });
+    } else {
+      var total = bw + 12 + fw;
+      this._btn('forge', W / 2 - total / 2, by, fw, bh, '异 变 工 坊',
+        '#d8ffc0', { type: 'forge' }, { fs: fs - 2 });
+      this._btn('start', W / 2 - total / 2 + fw + 12, by, bw, bh, '开 始 新 的 一 局', '#9fe8b0',
+        { type: 'start' }, { fs: fs });
+    }
+
+    var statY = stack ? (by - (bh + 10) - 14) : (H - bh - 34);
     ctx.textAlign = 'center';
     ctx.font = '600 10.5px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(140,165,195,.6)';
     ctx.fillText('历史最佳：第 ' + (p.stats.bestLevel || 0) + ' 关 · 累计 ' +
       (p.stats.runs || 0) + ' 局 · 累计击杀 ' + (p.stats.totalKills || 0),
-      W / 2, H - bh - 34);
+      W / 2, statY);
   };
 
   /* ---- 横屏：原版布局 ---- */
@@ -631,7 +640,7 @@
     this._tabs(ctx, 32, 66, 4 * 96 + 3 * 8, 32);
 
     if (this.tab === 'upgrade') this._upgradeTab(ctx, 32, 116, W - 64, H - 200);
-    else if (this.tab === 'garden') this._gardenTab(ctx, 32, 116, W - 64, H - 200);
+    else if (this.tab === 'pet') this._petTab(ctx, 32, 116, W - 64, H - 200);
     else if (this.tab === 'shop') this._shopTab(ctx, 32, 116, W - 64, H - 200);
     else this._codexTab(ctx, 32, 116, W - 64, H - 200);
 
@@ -658,7 +667,7 @@
     var bodyH = H - bodyY - 120;             // 给底部按钮和统计留出位置
 
     if (this.tab === 'upgrade') this._upgradeTab(ctx, pad, bodyY, cw, bodyH);
-    else if (this.tab === 'garden') this._gardenTab(ctx, pad, bodyY, cw, bodyH);
+    else if (this.tab === 'pet') this._petTab(ctx, pad, bodyY, cw, bodyH);
     else if (this.tab === 'shop') this._shopTab(ctx, pad, bodyY, cw, bodyH);
     else this._codexTab(ctx, pad, bodyY, cw, bodyH);
 
@@ -727,107 +736,126 @@
     }
   };
 
-  /* ---- 花园 ---- */
-  MetaView.prototype._gardenTab = function (ctx, x, y, w, h) {
-    var p = this.meta.profile, m = this.meta;
+  /* ---- 培育（室内花园）---- */
+  MetaView.prototype._petTab = function (ctx, x, y, w, h) {
+    var P = this.pet, F = this.forge;
     ctx.textAlign = 'left';
     ctx.font = '600 11.5px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#6d819e';
-    // 完整公式在 540 宽的屏上会顶出边界，竖屏只留结论
-    ctx.fillText(this.portrait
-      ? '花园 · 离线最多累计 ' + global.Meta.CAP.offlineH + ' 小时'
-      : '花园 · 离线最多累计 ' + global.Meta.CAP.offlineH +
-      ' 小时 · 产出 = 稀有度基础 ×(1+星级×0.1) ×(1+花园等级×0.05) ×(1+果实加成)', x, y - 8);
+    ctx.fillText('室内花园 · 只养这株异变植物 · 离线最多累计 ' +
+      (global.Pet ? global.Pet.OFFLINE_CAP_H : 8) + ' 小时', x, y - 8);
 
-    // 竖屏：最多 6 个花盆一行排不下（每格只剩 ~71），改成 3 列 × 2 行
-    var pts = Math.max(1, p.pots);
-    var cols = this.portrait ? 3 : pts;
-    var rows = Math.ceil(pts / cols);
-    var gap = 14;
-    var rowGap = 12;
-    var cw = (w - gap * (cols - 1)) / cols;
-    var bh = this.portrait ? 244 : 220;
-
-    for (var i = 0; i < p.pots; i++) {
-      var bx = x + (i % cols) * (cw + gap);
-      var by = y + Math.floor(i / cols) * (bh + rowGap);
-      panel(ctx, bx, by, cw, bh, 14, 'rgba(10,16,26,.9)', 'rgba(127,224,192,.24)');
-      var g = p.garden[i];
+    // ---- 空盆：还没领养 ----
+    if (!P || !P.hasPet()) {
+      var eh = this.portrait ? 200 : 176;
+      panel(ctx, x, y, w, eh, 14, 'rgba(10,16,26,.9)', 'rgba(127,224,192,.24)');
       ctx.textAlign = 'center';
-
-      if (!g) {
-        ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
-        ctx.fillStyle = '#6d819e';
-        ctx.fillText('空 花 盆', bx + cw / 2, by + 40);
-        // 选择植物
-        var kinds = ['sprout', 'peashooter', 'cabbagepult'];
-        // 原来是 by+68，按这个起点「选时长」那排按钮会掉出面板底边，上移到 by+56
-        var ky = by + 56;
-        ctx.font = '600 10.5px "Noto Sans SC", system-ui, sans-serif';
-        ctx.fillStyle = '#8fa8c6';
-        ctx.fillText(this.plantPick ? '再选时长种下' : '① 选植物', bx + cw / 2, ky - 10);
-        for (var k = 0; k < kinds.length; k++) {
-          var kk = kinds[k];
-          var sel = this.plantPick && this.plantPick.kind === kk;
-          var rate = m.yieldRate(kk);
-          this._btn('pk_' + i + '_' + kk, bx + 12, ky + k * 34, cw - 24, 30,
-            global.Meta.PLANTS[kk].name + ' · ' + rate.toFixed(1) + '/h',
-            sel ? '#9fe8b0' : '#7fe0c0', { type: 'plantPick', kind: kk }, { fs: 11.5 });
-        }
-        if (this.plantPick) {
-          ctx.font = '600 10.5px "Noto Sans SC", system-ui, sans-serif';
-          ctx.fillStyle = '#8fa8c6';
-          ctx.fillText('② 选时长', bx + cw / 2, ky + 116);
-          var DS = global.Meta.DURATIONS;
-          for (var q = 0; q < DS.length; q++) {
-            this._btn('pl_' + i + '_' + DS[q].key, bx + 12 + q * ((cw - 24) / 3),
-              ky + 132, (cw - 24) / 3 - 4, 28, DS[q].name,
-              '#9fe8b0', { type: 'plant', slot: i, duration: DS[q].key }, { fs: 10.5 });
-          }
-        }
-      } else {
-        var prog = m.potProgress(i);
-        var yld = m.potYield(i);
-        var A = global.PlantArt.Art ? global.PlantArt.Art.icon[g.kind] : null;
-        if (A) {
-          var sway = Math.sin(this.t * 1.6 + i) * 0.06;
-          ctx.save();
-          ctx.translate(bx + cw / 2, by + 52);
-          ctx.rotate(sway);
-          global.PX.draw(ctx, A, 0, 16, { frame: Math.floor(this.t * 8) % (A.frames || 1), scale: 2.2 });
-          ctx.restore();
-        }
-        ctx.font = '800 12.5px "Noto Sans SC", system-ui, sans-serif';
-        ctx.fillStyle = '#eaf3ff';
-        ctx.fillText(global.Meta.PLANTS[g.kind].name, bx + cw / 2, by + 84);
-
-        // 进度条
-        var pw2 = cw - 40;
-        ctx.fillStyle = 'rgba(255,255,255,.08)';
-        global.roundRect(ctx, bx + 20, by + 100, pw2, 12, 6); ctx.fill();
-        ctx.fillStyle = prog >= 1 ? '#9fe8b0' : '#7fe0c0';
-        global.roundRect(ctx, bx + 20, by + 100, pw2 * prog, 12, 6); ctx.fill();
-        ctx.font = '700 10px system-ui, sans-serif';
-        ctx.fillStyle = '#8fa8c6';
-        ctx.fillText(prog >= 1 ? '已成熟 · ' + yld + ' 星尘' :
-          Math.floor(prog * 100) + '% · 预计 ' + yld + ' 星尘', bx + cw / 2, by + 126);
-
-        this._btn('hv_' + i, bx + 20, by + 146, cw - 40, 38,
-          prog >= 1 ? '收 获' : '生长中', '#9fe8b0', { type: 'harvest', slot: i },
-          { disabled: prog < 1, fs: 13 });
-      }
+      ctx.font = '800 15px "Noto Sans SC", system-ui, sans-serif';
+      ctx.fillStyle = '#eaf3ff';
+      ctx.fillText('花盆里还什么都没有', x + w / 2, y + 52);
+      ctx.font = '600 11.5px "Noto Sans SC", system-ui, sans-serif';
+      ctx.fillStyle = '#8fa8c6';
+      wrapC(ctx, '去「异变工坊」领养那株被晶枢改变了颜色的牙苗 —— 它会一直跟着你。',
+        x + w / 2, y + 82, w - 48, 16);
+      this._btn('forge_empty', x + w / 2 - 95, y + eh - 62, 190, 44, '进 入 异 变 工 坊',
+        '#d8ffc0', { type: 'forge' }, { fs: 14 });
+      return;
     }
 
-    // 花园等级 / 统计
-    var fy = y + rows * (bh + rowGap) + 10;
+    var info = F ? F.petInfo() : null;
+    if (!info) return;
+
+    var ch = Math.min(h, this.portrait ? 320 : 288);
+    panel(ctx, x, y, w, ch, 14, 'rgba(10,16,26,.9)', hexA(info.color, 0.30));
+
+    /* ---- 左：立绘 + 名字 ---- */
+    var aw = this.portrait ? Math.min(190, w * 0.44) : 230;
+    var cx = x + aw / 2;
+    var A = (global.PetArt && global.PetArt.Art) ? global.PetArt.Art.icon[info.kind] : null;
+    if (A) {
+      ctx.save();
+      ctx.translate(cx, y + ch / 2 + 26);
+      ctx.rotate(Math.sin(this.t * 1.5) * 0.05);
+      global.PX.draw(ctx, A, 0, 18, { frame: Math.floor(this.t * 8) % (A.frames || 1), scale: 3 });
+      ctx.restore();
+    }
+    ctx.textAlign = 'center';
+    ctx.font = '900 18px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = info.color;
+    ctx.fillText(info.name, cx, y + 30);
+    ctx.font = '800 12px system-ui, sans-serif';
+    ctx.fillStyle = '#ffd45e';
+    ctx.fillText('Lv.' + info.level + ' / ' + info.maxLevel, cx, y + 52);
+
+    /* ---- 右：经验 / 血量 / 属性 / 操作 ---- */
+    var ix = x + aw + (this.portrait ? 10 : 24);
+    var iw = w - aw - (this.portrait ? 22 : 48);
+    var iy = y + 26;
+
+    // 经验条
     ctx.textAlign = 'left';
-    ctx.font = '700 12px "Noto Sans SC", system-ui, sans-serif';
+    ctx.font = '600 10.5px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#8fa8c6';
-    ctx.fillText('花园等级 Lv.' + p.gardenLevel + '　花盆 ' + p.pots + ' / 6　' +
-      '累计产出 ' + (p.stats.totalStardust || 0) + ' 星尘', x, fy);
+    ctx.fillText('经验', ix, iy);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#7fd8ff';
+    ctx.fillText(info.exp + ' / ' + info.expNeed, ix + iw, iy);
+    this._bar(ctx, ix, iy + 12, iw, 12, info.expRatio, '#7fd8ff');
+
+    // 血量条 + 恢复 ETA
+    var hy = iy + 44;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#8fa8c6';
+    ctx.fillText('血量', ix, hy);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = info.hpRatio > 0.5 ? '#7fe0a0' : info.hpRatio > 0.25 ? '#ffd479' : '#ff7b6b';
+    ctx.fillText(info.hp + ' / ' + info.hpMax +
+      (info.etaSec > 0 ? '　（回满 ' + (global.Pet ? global.Pet.fmtSec(info.etaSec) : '—') + '）' : '　已满'),
+      ix + iw, hy);
+    this._bar(ctx, ix, hy + 12, iw, 12, info.hpRatio,
+      info.hpRatio > 0.5 ? '#7fe0a0' : info.hpRatio > 0.25 ? '#ffd479' : '#ff7b6b');
+
+    // 战斗属性 + 出战状态
+    var sy = hy + 44;
+    ctx.textAlign = 'left';
+    ctx.font = '700 11.5px "Noto Sans SC", system-ui, sans-serif';
+    ctx.fillStyle = '#8fa8c6';
+    ctx.fillText('伤害 ' + info.dmg + '　·　攻击间隔 ' + info.interval.toFixed(2) + 's', ix, sy + 6);
+    ctx.fillStyle = P.isDeployed(info.pet.id) ? '#9fe8b0' : '#6d819e';
+    ctx.fillText(P.isDeployed(info.pet.id) ? '状态：出战中' : '状态：在花盆里', ix, sy + 26);
+
+    // 操作：浇水施肥 / 进异变工坊
+    var bw2 = (iw - 12) / 2;
+    var byy = y + ch - 66;
+    var cd = info.waterCdSec, left = info.waterLeftSec;
+    var wLabel = left > 0 ? '加速中 ' + (global.Pet ? global.Pet.fmtSec(left) : '')
+      : cd > 0 ? '冷却 ' + (global.Pet ? global.Pet.fmtSec(cd) : '') : '浇 水 施 肥';
+    this._btn('pet_water', ix, byy, bw2, 46, wLabel, '#7fe0a0',
+      { type: 'petWater' }, { disabled: cd > 0 || left > 0, fs: 13 });
+    this._btn('pet_forge', ix + bw2 + 12, byy, bw2, 46, '异 变 工 坊', '#d8ffc0',
+      { type: 'forge' }, { fs: 13 });
+
+    /* ---- 底部说明 ---- */
+    var fy = y + ch + 18;
+    ctx.textAlign = 'left';
     ctx.font = '600 11px "Noto Sans SC", system-ui, sans-serif';
     ctx.fillStyle = '#6d819e';
-    ctx.fillText('花盆扩容在「商店」购买；产出加成在「养成树 · 果实」分支。', x, fy + 22);
+    ctx.fillText('浇水施肥：恢复速度 ×2，持续 10 分钟，冷却 5 分钟。进化与升到 Lv.5 需要材料 —— 去「异变工坊」。',
+      x, fy);
+    ctx.fillStyle = 'rgba(140,165,195,.55)';
+    ctx.fillText('战斗中它挨的伤是真的，血空了得回这里慢慢养（回血药瓶在「异变工坊 · 材料」）。', x, fy + 20);
+  };
+
+  /** 细进度条（培育页私有，与 panel/btn 同一套视觉参数） */
+  MetaView.prototype._bar = function (ctx, x, y, w, h, ratio, col) {
+    ctx.save();
+    global.roundRect(ctx, x, y, w, h, h / 2);
+    ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fill();
+    if (ratio > 0) {
+      global.roundRect(ctx, x, y, Math.max(h, w * M.clamp(ratio, 0, 1)), h, h / 2);
+      ctx.fillStyle = col; ctx.fill();
+    }
+    ctx.restore();
   };
 
   /* ---- 商店 ---- */
@@ -896,7 +924,9 @@
     var step = this.portrait ? bw + 10 : 190;
 
     for (var i = 0; i < kinds.length; i++) {
-      var k = kinds[i], pd = global.Meta.PLANTS[k];
+      // 植物数值改从战场植物表读 —— 旧花园的 Meta.PLANTS（含 rarity / base 星尘产出）
+      // 已随花园一起删除，图鉴里再引用会直接抛错。
+      var k = kinds[i], pd = global.Battlefield.PLANTS[k];
       var bx = x + i * step, by = y, bh = 200;
       panel(ctx, bx, by, bw, bh, 14, 'rgba(10,16,26,.9)', 'rgba(127,224,192,.24)');
       var A = global.PlantArt.Art ? global.PlantArt.Art.icon[k] : null;
@@ -913,13 +943,14 @@
       ctx.fillText(pd.name, bx + bw / 2, by + 100);
       ctx.font = '700 10.5px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = '#8fa8c6';
-      ctx.fillText(global.Meta.RARITY_CN[pd.rarity] + ' · 花园 ' + pd.base + ' 星尘/时', bx + bw / 2, by + 120);
+      ctx.fillText(pd.desc || '', bx + bw / 2, by + 120);
       var pl = p.plants[k] || { star: 1, level: 1 };
       ctx.fillStyle = '#ffd45e';
       ctx.fillText('★' + pl.star + ' · Lv.' + pl.level, bx + bw / 2, by + 140);
       ctx.font = '600 10px "Noto Sans SC", system-ui, sans-serif';
       ctx.fillStyle = '#6d819e';
-      ctx.fillText('花园产出 ' + this.meta.yieldRate(k).toFixed(1) + ' / 时', bx + bw / 2, by + 162);
+      ctx.fillText('伤害 ' + pd.dmg + ' · 间隔 ' + pd.interval + 's · 耐久 ' + pd.hp,
+        bx + bw / 2, by + 162);
     }
 
     // 昆虫

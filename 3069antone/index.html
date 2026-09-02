@@ -74,6 +74,14 @@
 <script src="src/art/insectArt.js"></script>
 <script src="src/art/beeArt.js"></script>
 <script src="src/art/fx.js"></script>
+<!-- 培育植物（宠物）系统：数据 → 美术 → 系统 → 视图。
+     ★ data/* 必须早于 systems/battlefield.js（它在加载期就把宠物形态并入 PLANTS）
+       和 systems/meta.js（它在加载期就往 SHOP 里拼基础材料与血瓶）。
+       顺序错了不会报错，只会静默少东西 —— 所以别挪。 -->
+<script src="src/data/pets.js"></script>
+<script src="src/data/basicMat.js"></script>
+<script src="src/art/petArt.js"></script>
+<script src="src/art/materialArt.js"></script>
 <script src="src/systems/board2048.js"></script>
 <script src="src/systems/battlefield.js"></script>
 <script src="src/systems/director.js"></script>
@@ -82,8 +90,13 @@
 <script src="src/systems/cards.js"></script>
 <script src="src/systems/run.js"></script>
 <script src="src/systems/meta.js"></script>
+<script src="src/systems/pet.js"></script>
+<script src="src/systems/forge.js"></script>
 <script src="src/view/cardView.js"></script>
 <script src="src/view/metaView.js"></script>
+<script src="src/view/petPanel.js"></script>
+<script src="src/view/forgeView.js"></script>
+<script src="src/view/petChoose.js"></script>
 <!-- 编辑器导出的关卡数据（由 editor 的「下载 levels.js」生成）。缺失则游戏回落默认，行为不变。 -->
 <script src="src/data/levels.js"></script>
 <script src="src/main.js"></script>

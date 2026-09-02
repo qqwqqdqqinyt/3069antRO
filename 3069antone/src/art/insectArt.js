@@ -217,17 +217,24 @@
     P.circ(g, tx, ty, wid * 0.34, colTip);   // 吸盘状末端
   }
 
-  function drawSpider(g, w, h, f, n) {
+  /**
+   * noLegs = true 时只画身体，腿留给运行时（battleView._spiderRig）去画 ——
+   * 因为烤进帧里的腿无法与地面、锚点发生关系，只能原地摆动。
+   * 身体的 bob 起伏两边共用，所以无腿版不会显得僵。
+   */
+  function drawSpider(g, w, h, f, n, noLegs) {
     var t = f / n, ph = t * Math.PI * 2;
     var ground = h - 1.2;
     var bob = Math.sin(ph * 2) * 0.6;
     var cx = w * 0.42, cy = h * 0.50 + bob;      // 头胸部（朝左，故偏左）
     var ax = w * 0.70, ay = h * 0.46 + bob * 1.2; // 腹部（后坠）
 
-    var far = '#2a1436', near = '#5c2f75', tip = '#7d3fa8';
+    // 纯黑剪影 —— 主人要求："把蜘蛛重新绘制一遍只要黑色"。
+    // 去掉紫色/渐变/青色眼睛，全身只保留形状，与触手同色 → 视觉上是一体的。
+    var far = '#000000', near = '#000000', tip = '#000000';
 
     // 远侧 4 条：先画，压暗，落点略高（透视上的「里侧」）
-    for (var i = 0; i < 4; i++) {
+    if (!noLegs) for (var i = 0; i < 4; i++) {
       var o = (i - 1.5) * 3.4;
       tentacle(g, cx + o, cy - 0.8,
         cx + o - 1.6 + Math.sin(ph + i * 1.7) * 1.1, ground - 1.8,
@@ -235,27 +242,27 @@
     }
 
     // 腹部
-    P.ell(g, ax, ay, 7.2, 6.0, '#3a1d4a');
-    P.ell(g, ax - 1.2, ay - 1.4, 5.0, 4.0, '#5c2f75');
-    P.ell(g, ax + 1.0, ay + 0.6, 2.4, 2.0, '#7d3fa8');
-    P.ell(g, ax - 3.4, ay + 1.8, 1.2, 1.0, '#7d3fa8');
+    P.ell(g, ax, ay, 7.2, 6.0, '#000000');
+    P.ell(g, ax - 1.2, ay - 1.4, 5.0, 4.0, '#000000');
+    P.ell(g, ax + 1.0, ay + 0.6, 2.4, 2.0, '#000000');
+    P.ell(g, ax - 3.4, ay + 1.8, 1.2, 1.0, '#000000');
 
     // 头胸部
-    P.ell(g, cx, cy, 5.6, 4.6, '#4a2360');
-    P.ell(g, cx - 0.8, cy - 1.0, 3.6, 2.8, '#6b3390');
+    P.ell(g, cx, cy, 5.6, 4.6, '#000000');
+    P.ell(g, cx - 0.8, cy - 1.0, 3.6, 2.8, '#000000');
 
-    // 四对眼：两大两小，带冷色反光
-    eyeDot(g, cx - 3.2, cy - 1.4, 0.9, true);
-    eyeDot(g, cx - 1.7, cy - 2.3, 0.7, true);
-    P.circ(g, cx + 1.1, cy - 2.1, 0.6, '#9fffe0');
-    P.circ(g, cx - 0.1, cy - 0.5, 0.5, '#9fffe0');
+    // 四对眼：纯黑剪影下眼睛与身体同色，不画高光
+    eyeDot(g, cx - 3.2, cy - 1.4, 0.9, false);
+    eyeDot(g, cx - 1.7, cy - 2.3, 0.7, false);
+    P.circ(g, cx + 1.1, cy - 2.1, 0.6, '#000000');
+    P.circ(g, cx - 0.1, cy - 0.5, 0.5, '#000000');
 
     // 螯肢
     P.poly(g, [[cx - 4.4, cy + 1.2], [cx - 6.2, cy + 2.6], [cx - 6.8, cy + 4.2]], 1.1, far);
     P.poly(g, [[cx - 2.2, cy + 2.2], [cx - 3.4, cy + 3.8], [cx - 3.2, cy + 5.2]], 1.1, far);
 
     // 近侧 4 条：后画，压在身体上
-    for (var j = 0; j < 4; j++) {
+    if (!noLegs) for (var j = 0; j < 4; j++) {
       var o2 = (j - 1.5) * 3.4;
       tentacle(g, cx + o2, cy + 0.6,
         cx + o2 + 1.0 + Math.sin(ph + j * 1.3) * 1.4, ground,
@@ -387,11 +394,17 @@
 
     Art.beetle = P.makeSprite(30, 21, WALK, drawBeetle, { outline: '#0a0e18' });
     Art.spider = P.makeSprite(32, 24, WALK, drawSpider, { outline: '#150a1c' });
+    // 无腿身体：运行时触手版专用（battleView._spiderRig 自绘 8 条与地面/锚点交互的腿）。
+    // 完整版保留给图鉴与编辑器预览 —— 那里没有世界坐标，腿只能跟着帧摆。
+    Art.spiderBody = P.makeSprite(32, 24, WALK, function (g, w, h, f, n) {
+      return drawSpider(g, w, h, f, n, true);
+    }, { outline: '#150a1c' });
 
     Art.ant._flash = P.makeFlash(Art.ant, '#ffe9e0');
     Art.fireant._flash = P.makeFlash(Art.fireant, '#fff0c8');
     Art.beetle._flash = P.makeFlash(Art.beetle, '#dfe8ff');
     Art.spider._flash = P.makeFlash(Art.spider, '#e8d4ff');
+    Art.spiderBody._flash = P.makeFlash(Art.spiderBody, '#e8d4ff');
 
     // 特效
     Art.splatPea = P.makeSprite(12, 12, 6, function (g, w, h, f, n) { drawSplat(g, w, h, f, n, false); }, { outline: '#1e4a17', cut: 0.3 });

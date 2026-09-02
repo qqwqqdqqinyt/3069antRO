@@ -17,6 +17,8 @@
   var board, battle, director, boardView, battleView, fx, loop;
   // 持久系统（跨局保留，buildWorld 仅重置状态）
   var cards, run, meta, cardView, metaView;
+  // 宠物（培育植物）：独立于战场的养成系统，跨局保留
+  var pet, forge, petPanel, forgeView, petChoose;
   var toasts = [];
   var evolveMenu = null;   // {lane,col,x,y}
   var started = false;
@@ -46,6 +48,8 @@
     global.PlantArt.build();
     global.InsectArt.build();
     if (global.BeeArt) global.BeeArt.build();   // 蜜蜂（独立美术模块，简单挂载）
+    if (global.PetArt) global.PetArt.build();           // 培育植物（Q 版精灵）
+    if (global.MaterialArt) global.MaterialArt.build(); // 材料（纯形状，无表情）
 
     // 持久系统（跨局保留存档 / 卡牌 / 单局流程）
     meta = new global.Meta({ tuning: pkgTuning() });
@@ -53,6 +57,13 @@
     run = new global.Run();
     // 把养成树的永久加成注入卡牌 mod（装饰器模式，可追溯）
     cards.addDecorator(meta.decorator());
+
+    // 宠物（培育植物）：系统 + 门面 + 三个视图，全部跨局保留
+    pet = new global.Pet(meta);
+    forge = new global.Forge(meta, pet);
+    petPanel = new global.PetPanel({ pet: pet, battle: null });
+    forgeView = new global.ForgeView(forge, { w: W, h: H, portrait: L.portrait });
+    petChoose = new global.PetChoose({ w: W, h: H, portrait: L.portrait });
 
     buildWorld();
     bindInput();
@@ -67,6 +78,10 @@
     document.getElementById('loading').style.display = 'none';
     started = true;
     showHome();
+
+    // 第一次进游戏：弹「初次异变」三选一。选完永不可改，所以是强制模态 ——
+    // 点空白不穿透，必须选一株才能进家园（后期接背景剧情就替换这一屏的文案）。
+    if (pet && !pet.chosen()) petChoose.show();
   }
 
   /**
@@ -104,6 +119,9 @@
     if (boardView) boardView.relayout(rectOf(L.board));
     if (cardView) cardView.resize(W, H, L.portrait);
     if (metaView) metaView.resize(W, H, L.portrait);
+    if (forgeView) forgeView.resize(W, H, L.portrait);
+    if (petChoose) petChoose.resize(W, H, L.portrait);
+    if (petPanel) petPanel.cancel();   // 按钮位置随战场几何变，收起种植模式免得点歪
     evolveMenu = null;             // 旧坐标已失效，直接收起
   }
 
@@ -188,10 +206,23 @@
     meta._bind();
     cards._bind();
     run._bind();
+    pet._bind();
+    forge._bind();
+
+    // ★ 新世界 = 新的一局：场上没有培育植物，必须把出战登记清掉。
+    //   不清的话，上一局中途刷新页面 / 直接换局，_battleId 会一直留着，
+    //   结果整局都派不出宠物（canDeploy 恒返回「本局已派出」）。
+    //   注意：**跨关**（CMD_NEXT_LEVEL）不重建世界，所以宠物会一直留在场上。
+    pet.undeploy();
 
     // 视图（每次重建，构造里重新订阅事件）
     cardView = new global.CardView(cards, { w: W, h: H, portrait: L.portrait });
-    metaView = new global.MetaView(meta, run, { w: W, h: H, portrait: L.portrait, onStart: startRun });
+    metaView = new global.MetaView(meta, run, {
+      w: W, h: H, portrait: L.portrait, onStart: startRun, pet: pet, forge: forge
+    });
+
+    // 宠物面板挂在战场左上角，战场换了要跟着换引用
+    if (petPanel) { petPanel.setBattle(battle); petPanel.cancel(); }
 
     // 卡牌：重置并让养成装饰器生效 → 广播 MOD_CHANGED 给各系统
     cards.reset();
@@ -236,8 +267,10 @@
     };
   }
 
-  /** 是否处于模态层（选卡 / 决策 / 结算 / 家园）—— 此时局内输入冻结 */
+  /** 是否处于模态层（选卡 / 决策 / 结算 / 家园 / 异变工坊 / 初次异变）—— 此时局内输入冻结 */
   function isModal() {
+    if (petChoose && petChoose.visible) return true;      // 初次三选一：强制模态
+    if (forge && forge.isOpen()) return true;             // 异变工坊
     return !!cardView && (cardView.visible || (metaView && metaView.screen !== 'none'));
   }
 
@@ -252,6 +285,12 @@
       if (KEYMAP[e.key]) {
         e.preventDefault();
         if (!isModal()) global.Bus.emit(EV.CMD_MOVE, { dir: KEYMAP[e.key] });
+      }
+      if (e.key === 'Escape') {
+        if (petPanel) petPanel.cancel();
+        if (forge && forge.isOpen()) global.Bus.emit(EV.CMD_FORGE_CLOSE);
+        evolveMenu = null;
+        return;
       }
       if (e.key === 'r' || e.key === 'R') { startRun(); return; }
       if (e.key === ' ') {
@@ -272,8 +311,10 @@
     canvas.addEventListener('pointerdown', function (e) {
       var p = toLogical(e);
       if (isModal()) {
-        // 模态层（选卡 / 家园 / 结算）：按下即响应，手感更跟手
-        if (cardView.visible) cardView.onClick(p.x, p.y);
+        // 模态层（选卡 / 家园 / 结算 / 异变工坊 / 初次异变）：按下即响应，手感更跟手
+        if (petChoose && petChoose.visible) petChoose.onClick(p.x, p.y);
+        else if (forge && forge.isOpen()) forgeView.onClick(p.x, p.y);
+        else if (cardView.visible) cardView.onClick(p.x, p.y);
         else if (metaView && metaView.screen !== 'none') metaView.onClick(p.x, p.y);
         down = null;
         return;
@@ -307,8 +348,11 @@
     canvas.addEventListener('pointercancel', function () { down = null; downId = null; });
     canvas.addEventListener('pointermove', function (e) {
       var p = toLogical(e);
+      if (petChoose && petChoose.visible) { petChoose.onMove(p.x, p.y); return; }
+      if (forge && forge.isOpen()) { forgeView.onMove(p.x, p.y); return; }
       if (cardView && cardView.visible) cardView.onMove(p.x, p.y);
       else if (metaView && metaView.screen !== 'none') metaView.onMove(p.x, p.y);
+      else if (petPanel) petPanel.onMove(p.x, p.y);
     });
   }
 
@@ -349,6 +393,9 @@
   }
 
   function handleClick(p) {
+    // 培育植物面板（战场左上角）：展开列表 / 点开「选点种植」模式
+    if (petPanel && petPanel.onClick(p.x, p.y)) { evolveMenu = null; return true; }
+
     // 进化菜单优先
     if (evolveMenu) {
       var m = evolveMenu, hit = null;
@@ -383,7 +430,14 @@
           if (d < 40 && d < bd) { bd = d; best = { lane: l, col: c, x: sx, y: sy }; }
         }
       }
-      if (!best) return false;
+      if (!best) {
+        // 种植模式下点到了战场空处 → 当作放弃（不取消的话，玩家会卡在这个模式里出不去）
+        if (petPanel && petPanel.isPicking()) { petPanel.cancel(); return true; }
+        return false;
+      }
+      // 培育植物「选点种植」模式：点哪格种哪格（与种牙苗共用同一套命中判定）
+      if (petPanel && petPanel.isPicking()) return petPanel.plantAt(best);
+
       var plant = battle.plants.filter(function (q) { return q.lane === best.lane && q.col === best.col; })[0];
       if (plant && plant.kind === 'sprout') {
         evolveMenu = makeEvolveMenu(best);
@@ -420,6 +474,11 @@
     var modal = isModal();
     if (cardView) cardView.update(dt);
     if (metaView) metaView.update(dt);
+    // 宠物：自然恢复（战斗中由 tick 自己冻结）+ 各视图动画
+    if (pet) pet.tick();
+    if (petPanel) petPanel.update(dt);
+    if (forgeView) forgeView.update(dt);
+    if (petChoose) petChoose.update(dt);
     for (var i = toasts.length - 1; i >= 0; i--) {
       toasts[i].t += dt;
       if (toasts[i].t > toasts[i].life) toasts.splice(i, 1);
@@ -466,6 +525,11 @@
 
     if (cardView) cardView.draw(ctx);
     if (metaView) metaView.draw(ctx);
+
+    // 培育植物面板画在战场层（modal 时不画）；异变工坊 / 初次异变是顶层模态
+    if (petPanel && !isModal()) petPanel.draw(ctx);
+    if (forge && forge.isOpen() && forgeView) forgeView.draw(ctx);
+    if (petChoose && petChoose.visible) petChoose.draw(ctx);
 
     drawToasts();
     if (evolveMenu) drawEvolveMenu();

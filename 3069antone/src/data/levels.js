@@ -16,8 +16,8 @@ window.LEVEL_DATA = {
       "board": {
         "n": 5,
         "tier": 1,
-        "stepMax": 5,
-        "stepRegen": 1.5
+        "stepMax": 10,
+        "stepRegen": 1
       },
       "battle": {
         "lanes": 3,

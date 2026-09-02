@@ -26,7 +26,9 @@
     // 触手蜘蛛：不走路，靠八条触手在锚点间「抛出 → 缠绕 → 牵引」。
     // speed 只是兜底爬行速度；实际位移由打分选出的锚点决定。
     spider: {
-      kind: 'spider', name: '触手蛛', hp: 260, speed: 0.30, dmg: 14, armor: 0.10, scale: 1.10, gold: 22,
+      // speed 从 0.30 降到 0.22 —— 主人要求降速，好让四肢的卷曲与伸展看得清。
+      // 副作用：推进变慢，关卡节奏会松一些。
+      kind: 'spider', name: '触手蛛', hp: 260, speed: 0.22, dmg: 14, armor: 0.10, scale: 1.10, gold: 22,
       rv: 0.34,                 // v 方向半径：让它横跨两道时仍可被命中
       reach: 1.0,               // 触手前向射程，单位为「格宽」（cellW）
       laneSpan: 1.5,            // 触手跨道半径，单位为「车道高」（laneH）。>1 才够得着邻道
@@ -62,6 +64,18 @@
       desc: '吐出石榴籽，附带微弱燃烧'
     }
   };
+
+  /* ★ 培育植物（宠物）形态并入植物表。
+   *   数值唯一真相源在 data/pets.js（combatDefs），这里只做合并 ——
+   *   这样索敌 / 开火 / 受伤 / 绘制全走现成流程，无需在别处特判「这是宠物」。
+   *
+   *   注意：合并进来的是**基础数值**，不含等级加成。
+   *   等级加成是实例级的（每只宠物的等级不同），走 placePlant 的 opts.def 覆盖。
+   */
+  if (global.PetsData) {
+    var PET_DEFS = global.PetsData.combatDefs();
+    for (var pk in PET_DEFS) PLANTS[pk] = PET_DEFS[pk];
+  }
 
   /* ---------------- 关卡波次组成（关 1，来自 10_波次预算表） ---------------- */
   var WAVES = [
@@ -488,7 +502,8 @@
   Battlefield.prototype._bind = function () {
     var self = this;
     global.Bus.on(EV.CMD_DAMAGE_POOL, function (p) { self.applyDamagePool(p); }, this);
-    global.Bus.on(EV.CMD_PLANT_PLACE, function (p) { self.placePlant(p.slot, p.kind); }, this);
+    // opts 里带培育植物的 petId / 实例数值（普通植物不带，走静态表）
+    global.Bus.on(EV.CMD_PLANT_PLACE, function (p) { self.placePlant(p.slot, p.kind, p.opts); }, this);
     global.Bus.on(EV.CMD_PLANT_EVOLVE, function (p) { self.evolvePlant(p.slot, p.target); }, this);
     global.Bus.on(EV.CMD_WAVE_START, function () { self.startNextWave(); }, this);
     global.Bus.on(EV.CMD_HEAL_NODE, function (p) { self.healNode(p.amount); }, this);
@@ -566,7 +581,24 @@
 
   /* ---------------- 编队 ---------------- */
 
-  Battlefield.prototype.placePlant = function (slot, kind) {
+  /**
+   * 某植物实例的最终数值表：静态定义 + 实例覆盖。
+   * 覆盖只来自培育植物 —— 等级不同，dmg / interval / hp 就不同，
+   * 所以不能读静态表，得读种下时算好的那一份。
+   */
+  Battlefield.prototype.defOfPlant = function (p) {
+    return (p && p.def) || this.plantDef(p.kind);
+  };
+
+  /**
+   * 种一株植物。
+   * @param opts 可选：
+   *   petId  —— 标记这是玩家养的培育植物。挨打会同步扣到宠物血条上（见 systems/pet.js），
+   *             动画也改用 PetArt 的精灵（Q 版，与普通植物不同源）。
+   *   def    —— 实例数值覆盖（培育植物按等级算好的 dmg / interval / hp）
+   *   hp     —— 入场血量（培育植物带自己的花园血条上场，不按满血算）
+   */
+  Battlefield.prototype.placePlant = function (slot, kind, opts) {
     if (!this.plantDef(kind)) return null;
     if (slot.lane < 0 || slot.lane >= this.cfg.lanes) return null;
     if (slot.col < 0 || slot.col >= this.cfg.cols) return null;
@@ -576,18 +608,36 @@
         this.plants.splice(i, 1); break;
       }
     }
-    var hp = this.plantDef(kind).hp || 100;
+
+    var base = this.plantDef(kind);
+    var def = (opts && opts.def) ? Object.assign({}, base, opts.def) : base;
+    var hp = (opts && opts.hp != null) ? opts.hp : (def.hp || 100);
+    var petId = (opts && opts.petId) || null;
+
+    // 培育植物的精灵在 PetArt（Q 版），普通植物在 PlantArt
+    var Anim = petId && global.PetArt ? global.PetArt.PetAnimator : global.PlantArt.PlantAnimator;
+
     var p = {
       id: this._uid++, kind: kind, lane: slot.lane, col: slot.col,
       v: slot.lane,                    // 分数车道坐标；植物恒为整数
       x: this.slotX(slot.col), y: this.slotY(slot.lane),
       hp: hp, maxHp: hp,
+      def: def,                        // 实例数值（含培育植物的等级加成）
+      petId: petId,
       cd: this.rng.range(0, 0.4),
-      anim: new global.PlantArt.PlantAnimator(kind, this.rng.next() * 10),
+      anim: new Anim(kind, this.rng.next() * 10),
       fired: false, born: 0, evolving: 0, hitT: 0
     };
     this.plants.push(p);
     return p;
+  };
+
+  /** 场上是否已有某只培育植物（同局不重复派遣） */
+  Battlefield.prototype.hasPet = function (petId) {
+    for (var i = 0; i < this.plants.length; i++) {
+      if (this.plants[i].petId === petId) return this.plants[i];
+    }
+    return null;
   };
 
   /** 植物受击。返回实际伤害；致死则移除并让出格子。 */
@@ -843,7 +893,7 @@
   /* ---------------- 投射物 ---------------- */
 
   Battlefield.prototype._fire = function (plant, target) {
-    var def = this.plantDef(plant.kind);
+    var def = this.defOfPlant(plant);
     if (!def || !def.proj) return;
     var sx = plant.x + (def.muzzle ? def.muzzle.dx : 10);
     var sy = plant.y + (def.muzzle ? def.muzzle.dy : -12);
@@ -944,6 +994,34 @@
     noise: 0.18       // 随机扰动，防止每次都走同一条线显得机械
   };
   Battlefield.SPIDER_W = SPIDER_W;
+
+  /* 8 条腿的方位表 —— 逻辑层算 per-foot 落点要用，渲染层画腿也要用，
+     所以定义在逻辑层并挂出去，view 层引用。两边共用一份，改一处即可，
+     不会出现「逻辑认为腿在 A、画出来在 B」的错位。
+        dir —— 辐射方向（弧度）。屏幕 y 朝下为正：0=右、π/2=下、π=左、-π/2=上
+        ph  —— 相位，错开迈步与卷曲呼吸，避免八条腿同步
+        grp —— 分组，同组一次只允许一条腿迈步（否则会像跳）
+        ch  —— 卷曲手性 +1 右旋 / -1 左旋，相邻两条反方向卷，避免八条腿卷成风车
+        s   —— 触手形态：0 = 圆弧（全链同向卷），1 = S 形（卷曲角沿链由正到负，
+               中段过零反弯）。八条里混着来，才不会整齐得像复制粘贴。 */
+  var SPIDER_LEGS = [
+    { dir:  0.10, ph: 0.00, grp: 0, ch:  1, s: 1 },  // 右偏上
+    { dir:  0.78, ph: 1.13, grp: 1, ch: -1, s: 0 },  // 右下
+    { dir:  1.57, ph: 2.31, grp: 0, ch:  1, s: 1 },  // 正下
+    { dir:  2.35, ph: 3.42, grp: 1, ch: -1, s: 0 },  // 左下
+    { dir:  3.24, ph: 0.71, grp: 1, ch:  1, s: 0 },  // 左偏下
+    { dir:  3.93, ph: 1.94, grp: 0, ch: -1, s: 1 },  // 左上
+    { dir: -1.47, ph: 3.05, grp: 1, ch:  1, s: 0 },  // 上偏左
+    { dir: -2.25, ph: 4.18, grp: 0, ch: -1, s: 1 }   // 上偏右
+  ];
+  Battlefield.SPIDER_LEGS = SPIDER_LEGS;
+
+  // 腿的展开半径（**世界像素**）与纵向压缩系数。渲染层要用、逻辑层算落点也要用，
+  // 一并放在这里当单一数据源；view 层换算成精灵像素即可。
+  var SPIDER_LEG_SPREAD = 108;
+  var SPIDER_SQUASH_Y = 0.55;
+  Battlefield.SPIDER_LEG_SPREAD = SPIDER_LEG_SPREAD;
+  Battlefield.SPIDER_SQUASH_Y = SPIDER_SQUASH_Y;
 
   /* ---------------- 2.5D 投影（只作用于绘制） ----------------
    *
@@ -1058,7 +1136,7 @@
     for (var i = 0; i < this.plants.length; i++) {
       var p = this.plants[i];
       if (p.dead) continue;
-      var def = this.plantDef(p.kind);
+      var def = this.defOfPlant(p);
       if (!def || !def.interval) continue;      // 牙苗不还手，不构成威胁
       if (Math.abs(p.v - c.v) > 0.5) continue;  // 植物只打自己那条道
       if (c.x < p.x - 8) continue;              // 只打身前
@@ -1100,6 +1178,89 @@
       + this.rng.range(-W.noise, W.noise);
   };
 
+  /* ============================================================
+   *  per-foot 落点打分 —— 每条腿踩哪儿，也交给打分决定
+   *
+   *  与 SPIDER_W（身体下一步荡去哪）**分开两套权重**：身体要「推进 + 找猎物」，
+   *  单条腿要「踩得稳 + 躲火力 + 够得着」。混用一套会让腿替身体做决定，
+   *  八条腿一窝蜂往猎物那边倒 —— 蜘蛛的形态就散了。
+   * ============================================================ */
+  var FOOT_W = {
+    threat: 1.00,   // 躲开植物火力（_threatAt 归一化后的 DPS）
+    prey:   0.80,   // 够向残血猎物（_preyNear）
+    core:   0.45,   // 朝星枢（战场左边界）偏一点，落点带出「想往前挪」的意图
+    spread: 0.90,   // 偏离理想辐射点的惩罚 —— 这条是「像不像蜘蛛」的护栏
+    crowd:  0.55,   // 别跟别的腿踩一块
+    noise:  0.35    // 随机扰动，免得每次都踩同一个点
+  };
+  Battlefield.FOOT_W = FOOT_W;
+
+  var FOOT_EVAL = 0.35;   // 重算间隔（秒）。每帧算 8×N 个候选、每个再遍历一遍
+                          // 植物，手机端扛不住 —— 降频到 0.35s 一次足够跟得上。
+  var FOOT_CAND = 7;      // 每条腿撒几个候选
+  var FOOT_FAN = 0.55;    // 候选相对理想方向的最大偏角（弧度，约 ±31°）
+  var FOOT_VAR = 0.30;    // 候选相对理想半径的最大浮动（±30%）
+
+  /**
+   * 给 8 条腿各挑一个落点，结果缓存进 e.footPlan（世界坐标 {x,y,v}）。
+   * 渲染层直接读它 —— 逻辑与表现共用一个数据源，不会各画各的。
+   */
+  Battlefield.prototype._spiderFootPlan = function (e, dt) {
+    e.footT = (e.footT || 0) - (dt || 0);
+    if (e.footPlan && e.footPlan.length === 8 && e.footT > 0) return e.footPlan;
+    e.footT = FOOT_EVAL;
+
+    var spread = SPIDER_LEG_SPREAD, squash = SPIDER_SQUASH_Y;
+    var plan = e.footPlan || (e.footPlan = []);
+    var i, c;
+
+    for (i = 0; i < 8; i++) {
+      var lg = SPIDER_LEGS[i];
+      var best = null, bestS = -Infinity;
+      for (c = 0; c < FOOT_CAND; c++) {
+        // 候选撒在自己的理想辐射点附近：角度 ±FOOT_FAN、半径 ±FOOT_VAR。
+        // 偏离越大分越低（spread 项），所以瘸不到邻腿的扇区里去。
+        var ang = lg.dir + (this.rng.next() - 0.5) * 2 * FOOT_FAN;
+        var rr = 1 + (this.rng.next() - 0.5) * 2 * FOOT_VAR;
+        var cx = e.x + Math.cos(ang) * spread * rr;
+        var cy = e.y + Math.sin(ang) * spread * rr * squash;
+        var gv = this._vOfY(cy);
+        if (gv === null) continue;                     // 落到战场外，弃掉
+        var cand = { x: cx, y: cy, v: gv };
+
+        var dev = (rr < 1) ? (1 - rr) : (rr - 1);      // 半径偏离 0 ~ FOOT_VAR
+        var s = -FOOT_W.threat * this._threatAt(cand)
+          + FOOT_W.prey * this._preyNear(cand, 46)
+          + FOOT_W.core * M.clamp((e.x - cx) / spread, -1, 1)
+          - FOOT_W.spread * (dev / FOOT_VAR)
+          + this.rng.range(-FOOT_W.noise, FOOT_W.noise);
+        if (s > bestS) { bestS = s; best = cand; }
+      }
+      // 兜底：候选全被弃（贴着战场边缘）时退回理想点
+      if (!best) {
+        var iy = e.y + Math.sin(lg.dir) * spread * squash;
+        var iv = this._vOfY(iy);
+        best = { x: e.x + Math.cos(lg.dir) * spread, y: iy, v: (iv === null ? e.v : iv) };
+      }
+      plan[i] = best;
+    }
+
+    // 腿间互斥：落点挨太近就互相推开，避免两条腿叠成一坨
+    var minD = spread * 0.45;
+    for (i = 0; i < 8; i++) {
+      for (var j = i + 1; j < 8; j++) {
+        var dx = plan[j].x - plan[i].x, dy = plan[j].y - plan[i].y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < minD && d > 0.001) {
+          var push = (minD - d) * 0.5 / d;
+          plan[i].x -= dx * push; plan[i].y -= dy * push;
+          plan[j].x += dx * push; plan[j].y += dy * push;
+        }
+      }
+    }
+    return plan;
+  };
+
   /** 啃咬：咬程内挑「血量比例最低」的植物下手 —— 优先补刀残血 */
   Battlefield.prototype._spiderBite = function (e, R) {
     var best = null, bestRatio = Infinity;
@@ -1120,6 +1281,7 @@
     var R = this.roleDef(e.role) || this.roleDef('spider');
     e.stateT += dt;
     e.biteCd -= dt;
+    this._spiderFootPlan(e, dt);      // 8 条腿的落点（内部按 FOOT_EVAL 降频）
 
     if (e.state === 'seek') {
       e.seekT -= dt;
@@ -1260,7 +1422,7 @@
       p.born = Math.min(1, p.born + dt * 3);
       if (p.evolving > 0) p.evolving = Math.max(0, p.evolving - dt * 2);
       p.anim.update(dt);
-      var def = this.plantDef(p.kind);
+      var def = this.defOfPlant(p);
       if (!def || !def.interval) continue;
       p.cd -= dt;
       if (p.cd <= 0) {
